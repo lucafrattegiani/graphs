@@ -8,5 +8,5 @@ dependencies:
   - numpy
   - matplotlib
   - pip:
-    - -r envs/requirements-torch-cuda.txt
-    - -r envs/requirements.txt
+    - -r requirements-torch-cuda.txt
+    - -r requirements.txt

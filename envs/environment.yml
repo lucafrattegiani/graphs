@@ -9,4 +9,4 @@ dependencies:
   - matplotlib
   - pip:
     - torch
-    - -r envs/requirements.txt
+    - -r requirements.txt
