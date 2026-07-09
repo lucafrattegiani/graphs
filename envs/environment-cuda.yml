@@ -7,5 +7,5 @@ dependencies:
   - numpy
   - matplotlib
   - pip:
-    - torch
-    - torch_geometric
+    - -r envs/requirements-torch-cuda.txt
+    - -r envs/requirements.txt
