@@ -7,6 +7,7 @@ dependencies:
   - ipykernel
   - numpy
   - matplotlib
+  - networkx
   - pip:
     - torch
     - -r requirements.txt

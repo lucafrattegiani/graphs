@@ -131,7 +131,7 @@ def rescale(positions: torch.Tensor, lim_inf: float = -1.0, lim_sup: float = 1.0
     return positions
 
 #Polygonal structure
-def polygonal(n: int, device, radius: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:
+def polygonal(n: int, device: torch.device | str = "cpu", radius: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:
     """
     Generate n spatial coordinates placed on a regular polygon having n vertices.
 
@@ -141,7 +141,7 @@ def polygonal(n: int, device, radius: float = 1.0, translation: tuple[float, flo
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     radius : float, default = 1.0
         Radius of the regular polygon.
@@ -162,7 +162,7 @@ def polygonal(n: int, device, radius: float = 1.0, translation: tuple[float, flo
     return positions
 
 #Elliptic structure
-def ellipse(n: int, device, amplitude: float = 1.0, elongation: float = 2.0, orientation: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:
+def ellipse(n: int, device: torch.device | str = "cpu", amplitude: float = 1.0, elongation: float = 2.0, orientation: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:
     """
     Generate n spatial coordinates placed on the boundary of an ellipse.
 
@@ -170,7 +170,7 @@ def ellipse(n: int, device, amplitude: float = 1.0, elongation: float = 2.0, ori
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     amplitude : float, default = 1.0
         Base scale of the ellipse. It controls the minor semi-axis before rotation.
@@ -215,7 +215,7 @@ def ellipse(n: int, device, amplitude: float = 1.0, elongation: float = 2.0, ori
     return positions
 
 #Random square structure
-def square(n: int, device, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
+def square(n: int, device: torch.device | str = "cpu", lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
     """
     Generate n random spatial coordinates in the square [lim_inf, lim_sup] x [lim_inf, lim_sup].
 
@@ -223,7 +223,7 @@ def square(n: int, device, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     lim_inf : float, default = -1.0
         Lower limit of the coordinate range.
@@ -241,7 +241,7 @@ def square(n: int, device, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch
     return positions
 
 #Random circle structure
-def circle(n: int, device, translation: tuple[float, float] = (0.0, 0.0), radius: float = 1.0) -> torch.Tensor:
+def circle(n: int, device: torch.device | str = "cpu", translation: tuple[float, float] = (0.0, 0.0), radius: float = 1.0) -> torch.Tensor:
     """
     Generate n random spatial coordinates uniformly distributed inside a circle.
 
@@ -251,7 +251,7 @@ def circle(n: int, device, translation: tuple[float, float] = (0.0, 0.0), radius
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     translation : tuple[float, float], default = (0.0, 0.0)
         Translation vector applied to the center of the plotting window.
@@ -282,7 +282,7 @@ def circle(n: int, device, translation: tuple[float, float] = (0.0, 0.0), radius
     return positions
 
 #Random bubble communities
-def bubbles(n: int, device, K: int, radius: float = 0.2) -> torch.Tensor:
+def bubbles(n: int, device: torch.device | str = "cpu", K: int, radius: float = 0.2) -> torch.Tensor:
     """
     Generate node positions in circular bubbles representing ordered communities.
 
@@ -290,7 +290,7 @@ def bubbles(n: int, device, K: int, radius: float = 0.2) -> torch.Tensor:
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     K : int 
         Number of communities.
@@ -332,7 +332,7 @@ def bubbles(n: int, device, K: int, radius: float = 0.2) -> torch.Tensor:
     return positions
 
 #Noisy polygonal structure
-def ring(n: int, device, mode: str = "polygonal", amplitude: float = 1.0, elongation: float = 2.0, orientation: float = 1.0, translation: tuple[float, float] = (0.0, 0.0), radius: float = 1.0, noise_scale: float = 0.05, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
+def ring(n: int, device: torch.device | str = "cpu", mode: str = "polygonal", amplitude: float = 1.0, elongation: float = 2.0, orientation: float = 1.0, translation: tuple[float, float] = (0.0, 0.0), radius: float = 1.0, noise_scale: float = 0.05, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
     """
     Generate n spatial coordinates placed on a noisy regular polygon.
 
@@ -342,7 +342,7 @@ def ring(n: int, device, mode: str = "polygonal", amplitude: float = 1.0, elonga
     ----------
     n : int
         Number of spatial coordinates to generate.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     mode : str, default = "polygonal"
         Method to generate the base positions. It can be "polygonal" or "ellipse".
@@ -377,7 +377,7 @@ def ring(n: int, device, mode: str = "polygonal", amplitude: float = 1.0, elonga
     return positions
 
 #Two-column structure
-def two_columns(n: int, device, noise_scale: float = 0.05) -> torch.Tensor:
+def two_columns(n: int, device: torch.device | str = "cpu", noise_scale: float = 0.05) -> torch.Tensor:
     """
     Generate n spatial coordinates placed on two noisy ordered vertical columns.
 
@@ -389,7 +389,7 @@ def two_columns(n: int, device, noise_scale: float = 0.05) -> torch.Tensor:
     ----------
     n : int
         Number of nodes.
-    device : torch.device
+    device : torch.device | str, default = "cpu"
         Device on which to create the tensor.
     noise_scale : float, default = 0.05
         Standard deviation of the noise added to each coordinate.

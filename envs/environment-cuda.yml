@@ -7,6 +7,7 @@ dependencies:
   - ipykernel
   - numpy
   - matplotlib
+  - networkx
   - pip:
     - -r requirements-torch-cuda.txt
     - -r requirements.txt

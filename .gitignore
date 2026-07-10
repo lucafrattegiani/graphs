@@ -3,3 +3,6 @@ __pycache__/
 
 # Files
 .DS_Store
+
+# Notebooks
+graph_analysis.ipynb
