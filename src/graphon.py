@@ -282,7 +282,7 @@ def circle(n: int, device: torch.device | str = "cpu", translation: tuple[float,
     return positions
 
 #Random bubble communities
-def bubbles(n: int, device: torch.device | str = "cpu", K: int, radius: float = 0.2) -> torch.Tensor:
+def bubbles(n: int, device: torch.device | str = "cpu", radius: float = 0.2, K: int = 3) -> torch.Tensor:
     """
     Generate node positions in circular bubbles representing ordered communities.
 

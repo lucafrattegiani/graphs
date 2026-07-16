@@ -8,6 +8,7 @@ dependencies:
   - numpy
   - matplotlib
   - networkx
+  - scipy
   - pip:
     - -r requirements-torch-cuda.txt
     - -r requirements.txt

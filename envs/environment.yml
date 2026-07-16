@@ -8,6 +8,7 @@ dependencies:
   - numpy
   - matplotlib
   - networkx
+  - scipy
   - pip:
     - torch
     - -r requirements.txt
