@@ -4,11 +4,3 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  - ipykernel
-  - numpy
-  - matplotlib
-  - networkx
-  - scipy
-  - pip:
-    - torch
-    - -r requirements.txt

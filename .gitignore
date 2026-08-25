@@ -1,7 +1,10 @@
 # Python
 __pycache__/
+*.egg-info/
+.venv/
 
 # Files
 .DS_Store
 
 # Notebooks
+.ipynb_checkpoints/

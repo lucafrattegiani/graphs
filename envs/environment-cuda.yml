@@ -4,11 +4,5 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  - ipykernel
-  - numpy
-  - matplotlib
-  - networkx
-  - scipy
   - pip:
     - -r requirements-torch-cuda.txt
-    - -r requirements.txt

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphtools"
+version = "0.1.0"
+description = "Graphon sampling and graph analysis tools"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib",
+    "networkx",
+    "numpy",
+    "scipy",
+    "torch",
+    "torch-geometric",
+    "torch-kmeans",
+]
+
+[project.optional-dependencies]
+notebook = [
+    "ipykernel",
+    "ipywidgets",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
