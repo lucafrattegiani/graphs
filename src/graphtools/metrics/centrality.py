@@ -7,7 +7,7 @@ import networkx as nx
 from torch_geometric.utils import to_networkx
 
 #Utilities
-from ..utils import gini_index
+from ..utils.measures import gini_index
 
 def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.device | str = "cpu", centralization: str = "none") -> torch.Tensor:
     """

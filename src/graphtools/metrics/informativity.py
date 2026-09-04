@@ -1,7 +1,7 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
-from ..utils import gaussian_hellinger_distance, gaussian_kl_divergence
+from ..utils.measures import gaussian_hellinger_distance, gaussian_kl_divergence
 
 def jsd_informativeness(graph: Data, device: torch.device | str = "cpu", aggregate: bool = True, attributes_type: str = "hard", level: str = "node") -> torch.Tensor:
     """

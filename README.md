@@ -1,6 +1,9 @@
 # Graphtools
 
-Graphon sampling and graph analysis based on PyTorch and PyTorch Geometric.
+PyTorch and PyTorch Geometric based package for:
+- Graphon sampling (module ```graphon```)
+- Network analysis (module ```stats```)
+- Graph construction (module ```builder```)
 
 ## Dependency management
 
@@ -47,7 +50,7 @@ python -m pip install -e ".[notebook]"
 ## Import package
 
 ```python
-from graphtools import graphon, metrics
+from graphtools import graphon, stats, builder
 ```
 
 ## Package update

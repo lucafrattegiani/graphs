@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 
 #Utilities
-from ..utils import _validate_size, _class_probabilities
+from ..utils.validity import _validate_size, _class_probabilities
 
 
 def hard_state(n: int, K: int, device: torch.device | str = "cpu", one_hot: bool = True,
