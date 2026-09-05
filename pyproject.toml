@@ -13,6 +13,7 @@ dependencies = [
     "networkx",
     "numpy",
     "scipy",
+    "shapely>=2.1",
     "torch",
     "torch-geometric",
     "torch-kmeans",

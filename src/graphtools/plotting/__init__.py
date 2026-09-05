@@ -2,6 +2,7 @@
 
 from .plotting import (
     plot_elbow,
+    plot_epsilon_voronoi,
     plot_graph,
     plot_heatmap,
     plot_nodes,
@@ -12,6 +13,7 @@ from .plotting import (
 
 __all__ = [
     "plot_elbow",
+    "plot_epsilon_voronoi",
     "plot_graph",
     "plot_heatmap",
     "plot_nodes",

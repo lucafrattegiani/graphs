@@ -2,13 +2,20 @@
 import numpy as np
 import torch
 from scipy.spatial import Voronoi, voronoi_plot_2d
+from shapely.geometry import Polygon
 from torch_geometric.data import Data
 
 #Plotting
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
 from ..utils.matrices import adjacency_matrix
+
+_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.65)
+_VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
+_VORONOI_EDGE_ALPHA = 0.8
+_VORONOI_EDGE_WIDTH = 1.0
 
 def rescale(positions: torch.Tensor, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
     """
@@ -73,14 +80,18 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
     else:
         fig = ax.figure
 
+    # Standard Voronoi cells cover the whole plane. Coloring the axes gives
+    # both finite and infinite cells the same fill used by epsilon-Voronoi.
+    ax.set_facecolor(_VORONOI_FACE_COLOR)
+
     voronoi_plot_2d(
         voronoi,
         ax = ax,
         show_points = False,
         show_vertices = False,
-        line_colors = "tab:blue",
-        line_width = 1.0,
-        line_alpha = 0.8,
+        line_colors = _VORONOI_EDGE_COLOR,
+        line_width = _VORONOI_EDGE_WIDTH,
+        line_alpha = _VORONOI_EDGE_ALPHA,
     )
 
     ax.set_title(title)
@@ -92,10 +103,67 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
         plt.show()
 
 
+def plot_epsilon_voronoi(cells: list[Polygon],
+                         title: str = "Epsilon-Voronoi tessellation",
+                         ax: Axes | None = None) -> None:
+    """Plot epsilon-Voronoi cells without drawing their generating points.
+
+    Parameters
+    ----------
+    cells : list[shapely.geometry.Polygon]
+        Epsilon-Voronoi cells to plot.
+    title : str, default = "Epsilon-Voronoi tessellation"
+        Title displayed above the plot.
+    ax : matplotlib.axes.Axes | None, default = None
+        Axes on which to draw. If None, a new figure is created and displayed.
+
+    Returns
+    -------
+    None
+        The function draws the tessellation and does not return a value. The
+        figure is displayed only when ``ax`` is None.
+    """
+    if not isinstance(cells, list):
+        raise TypeError("cells must be a list of shapely.geometry.Polygon objects")
+    if not all(isinstance(cell, Polygon) for cell in cells):
+        raise TypeError("cells must contain only shapely.geometry.Polygon objects")
+    if not isinstance(title, str):
+        raise TypeError("title must be a string")
+
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize = (7, 7))
+    else:
+        fig = ax.figure
+
+    for cell in cells:
+        if cell.is_empty:
+            continue
+
+        coordinates = np.asarray(cell.exterior.coords)
+        ax.fill(
+            coordinates[:, 0],
+            coordinates[:, 1],
+            facecolor = _VORONOI_FACE_COLOR,
+            edgecolor = _VORONOI_EDGE_COLOR,
+            linewidth = _VORONOI_EDGE_WIDTH,
+            alpha = _VORONOI_EDGE_ALPHA,
+        )
+
+    ax.set_title(title)
+    ax.set_aspect("equal", adjustable = "box")
+    ax.autoscale_view()
+    ax.axis("off")
+
+    if standalone:
+        fig.tight_layout()
+        plt.show()
+
+
 def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = None,
                    directed: bool = False, title: str = "", ax: Axes | None = None,
                    labels: torch.Tensor | None = None,
-                   voronoi: Voronoi | None = None) -> None:
+                   voronoi: Voronoi | list[Polygon] | None = None) -> None:
     """Plot two-dimensional spatial positions and their optional connections.
 
     Parameters
@@ -115,8 +183,9 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     labels : torch.Tensor | None, default = None
         Optional integer class assignment for each position, with shape
         ``[num_nodes]`` or ``[num_nodes, 1]``.
-    voronoi : scipy.spatial.Voronoi | None, default = None
-        Optional Voronoi tessellation to draw behind the positions.
+    voronoi : scipy.spatial.Voronoi | list[shapely.geometry.Polygon] | None, default = None
+        Optional standard or epsilon-Voronoi tessellation to draw behind the
+        positions.
 
     Returns
     -------
@@ -197,8 +266,20 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     else:
         fig = ax.figure
 
-    if voronoi is not None:
+    if isinstance(voronoi, Voronoi):
         plot_voronoi(voronoi, title = title, ax = ax)
+    elif isinstance(voronoi, list):
+        plot_epsilon_voronoi(voronoi, title = title, ax = ax)
+        nonempty_cells = [cell for cell in voronoi if not cell.is_empty]
+        if nonempty_cells:
+            cell_bounds = np.asarray([cell.bounds for cell in nonempty_cells])
+            plot_min = np.minimum(plot_min, cell_bounds[:, :2].min(axis = 0))
+            plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis = 0))
+    elif voronoi is not None:
+        raise TypeError(
+            "voronoi must be a scipy.spatial.Voronoi object, "
+            "a list of shapely.geometry.Polygon objects, or None"
+        )
 
     if num_edges > 0:
         ax.add_collection(
@@ -300,7 +381,8 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         cells = getattr(graph, "cells", None)
         if cells is None:
             raise ValueError(
-                "graph.cells must contain a Voronoi object when voronoi=True"
+                "graph.cells must contain a standard or epsilon-Voronoi "
+                "tessellation when voronoi=True"
             )
 
     plot_positions(
