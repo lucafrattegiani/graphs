@@ -32,7 +32,8 @@ def ring_graphon(x: torch.Tensor, y: torch.Tensor, sigma: float = 0.08) -> torch
     return probabilities
 
 #Communities (stochastic block model)
-def sbm_graphon(x: torch.Tensor, y: torch.Tensor, block_probs: torch.Tensor = torch.tensor([[0.8, 0.1], [0.1, 0.8]])) -> torch.Tensor:
+def sbm_graphon(x: torch.Tensor, y: torch.Tensor,
+                block_probs: torch.Tensor | None = None) -> torch.Tensor:
     """
     Multi-community stochastic block model graphon.
 
@@ -40,14 +41,20 @@ def sbm_graphon(x: torch.Tensor, y: torch.Tensor, block_probs: torch.Tensor = to
     ----------
     x, y:
         Latent coordinates in [0, 1].
-    block_probs:
-        Matrix of shape [K, K], where block_probs[a, b] is the connection probability between block a and block b.
+    block_probs : torch.Tensor | None, default = None
+        Matrix of shape [K, K], where block_probs[a, b] is the connection
+        probability between block a and block b.
 
     Returns
     -------
     torch.Tensor
         Connection probabilities in [0, 1].
     """
+    if block_probs is None:
+        block_probs = x.new_tensor([[0.8, 0.1], [0.1, 0.8]])
+    else:
+        block_probs = torch.as_tensor(block_probs, dtype = x.dtype, device = x.device)
+
     K = block_probs.shape[0] #Extract number of blocks
 
     x_block = torch.clamp((x * K).long(), max = K - 1) #Assign every source node to a block according to its latent coordinate
@@ -117,7 +124,8 @@ def random_graphon(x: torch.Tensor, y: torch.Tensor, p: float = 0.5) -> torch.Te
 #SAMPLING CONNECTIONS
 #--------------------------------------------------
 
-def sample_edges(n: int, structure: str = "random", ordered: bool = True, **kwargs) -> torch.Tensor:
+def sample_edges(n: int, structure: str = "random", ordered: bool = True,
+                 device: torch.device | str = "cpu", **kwargs) -> torch.Tensor:
     """
     Sample undirected edges given a specified connection structure.
 
@@ -131,6 +139,8 @@ def sample_edges(n: int, structure: str = "random", ordered: bool = True, **kwar
     ordered : bool, default = True
         If True, sort the latent positions so that node indices follow their
         order on the latent interval.
+    device : torch.device | str, default = "cpu"
+        Device on which to sample latent coordinates and edges.
     **kwargs
         Additional arguments accepted by the selected graphon function.
 
@@ -160,12 +170,13 @@ def sample_edges(n: int, structure: str = "random", ordered: bool = True, **kwar
             f"Choose one of: {supported_structures}."
         )
 
-    z = torch.rand(n) #Latent node positions
+    device = torch.device(device)
+    z = torch.rand(n, device = device) #Latent node positions
     if ordered:
         z = torch.sort(z).values #Node 0 has the smallest latent position
 
     #Generate every possible undirected edge without self-loops
-    start, end = torch.triu_indices(n, n, offset = 1)
+    start, end = torch.triu_indices(n, n, offset = 1, device = device)
     probabilities = graphon_functions[structure](z[start], z[end], **kwargs)
 
     #Sample and retain the existing edges

@@ -1,8 +1,9 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
+from ..utils.validity import _graph_device
 
-def local_clustering_coeff(graph: Data, device: torch.device | str = "cpu") -> torch.Tensor:
+def local_clustering_coeff(graph: Data, device: torch.device | str | None = None) -> torch.Tensor:
     """
     Computes the local clustering coefficient for each node in the graph. Defined as:
 
@@ -23,12 +24,14 @@ def local_clustering_coeff(graph: Data, device: torch.device | str = "cpu") -> t
     torch.Tensor
         Local clustering coefficient for each node.
     """
+    device = _graph_device(graph, device)
     if graph.num_nodes < 2: #Nan values for 1 node graphs
         return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device)
     
     # Adjacency matrix
     adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), device = device)
-    adj_matrix[graph.edge_index[0], graph.edge_index[1]] = 1
+    edge_index = graph.edge_index.to(device)
+    adj_matrix[edge_index[0], edge_index[1]] = 1
 
     # Compute local clustering coefficient
     triangles = torch.matmul(torch.matmul(adj_matrix, adj_matrix), adj_matrix).diagonal() # Compute number of triangles for each node
@@ -41,7 +44,7 @@ def local_clustering_coeff(graph: Data, device: torch.device | str = "cpu") -> t
     
     return local_clustering
 
-def global_clustering_coeff(graph: Data, device: torch.device | str = "cpu") -> torch.Tensor:
+def global_clustering_coeff(graph: Data, device: torch.device | str | None = None) -> torch.Tensor:
     """
     Computes the global clustering coefficient of the graph. Defined as:
 
@@ -57,12 +60,14 @@ def global_clustering_coeff(graph: Data, device: torch.device | str = "cpu") -> 
     device : torch.device | str
         Device to perform computations on.
     """
+    device = _graph_device(graph, device)
     if graph.num_nodes < 3: #Nan values for graphs with less than 3 nodes
         return torch.tensor(torch.nan, dtype = torch.float32, device = device)
 
     # Adjacency matrix
     adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), device = device)
-    adj_matrix[graph.edge_index[0], graph.edge_index[1]] = 1
+    edge_index = graph.edge_index.to(device)
+    adj_matrix[edge_index[0], edge_index[1]] = 1
 
     # Compute global clustering coefficient
     closed_triplets = torch.matmul(torch.matmul(adj_matrix, adj_matrix), adj_matrix).diagonal().sum() # Total number of closed triplets

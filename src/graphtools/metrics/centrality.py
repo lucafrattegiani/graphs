@@ -8,8 +8,9 @@ from torch_geometric.utils import to_networkx
 
 #Utilities
 from ..utils.measures import gini_index
+from ..utils.validity import _graph_device
 
-def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.device | str = "cpu", centralization: str = "none") -> torch.Tensor:
+def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.device | str | None = None, centralization: str = "none") -> torch.Tensor:
     """
     Computes betweenness centrality for nodes in the graph. Defined as:
 
@@ -36,6 +37,7 @@ def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.d
     torch.Tensor
         Betweenness centrality of the graph.
     """
+    device = _graph_device(graph, device)
     if centralization not in ["none", "freeman", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'freeman', 'gini'}")
 
@@ -63,7 +65,7 @@ def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.d
 
     return betweeness
 
-def harmonic_centrality(graph: Data, device: torch.device | str = "cpu", normalized: bool = True, centralization: str = "none") -> torch.Tensor:
+def harmonic_centrality(graph: Data, device: torch.device | str | None = None, normalized: bool = True, centralization: str = "none") -> torch.Tensor:
     """
     Computes the harmonic centrality of the graph. Defined as:
 
@@ -89,6 +91,7 @@ def harmonic_centrality(graph: Data, device: torch.device | str = "cpu", normali
     torch.Tensor
         Harmonic centrality of the graph.
     """
+    device = _graph_device(graph, device)
     if centralization not in ["none", "freeman", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'freeman', 'gini'}")
 
@@ -121,7 +124,7 @@ def harmonic_centrality(graph: Data, device: torch.device | str = "cpu", normali
 
     return harmonic_centrality
 
-def pagerank_centrality(graph: Data, device: torch.device | str = "cpu", alpha: float = 0.85, directed: bool = False, centralization: str = "none") -> torch.Tensor:
+def pagerank_centrality(graph: Data, device: torch.device | str | None = None, alpha: float = 0.85, directed: bool = False, centralization: str = "none") -> torch.Tensor:
     """
     Computes the PageRank centrality of the graph. Defined as:
 
@@ -149,6 +152,7 @@ def pagerank_centrality(graph: Data, device: torch.device | str = "cpu", alpha: 
     torch.Tensor
         PageRank centrality of the graph.
     """
+    device = _graph_device(graph, device)
     if centralization not in ["none", "entropy", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'entropy', 'gini'}")
 
@@ -170,7 +174,7 @@ def pagerank_centrality(graph: Data, device: torch.device | str = "cpu", alpha: 
 
     return pagerank_centrality
 
-def centrality(graph: Data, method: str, device: torch.device | str = "cpu",
+def centrality(graph: Data, method: str, device: torch.device | str | None = None,
                centralization: str = "none", **kwargs) -> torch.Tensor:
     """
     Computes a centrality measure using the requested method.

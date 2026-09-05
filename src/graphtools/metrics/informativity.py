@@ -2,8 +2,9 @@
 import torch
 from torch_geometric.data import Data
 from ..utils.measures import gaussian_hellinger_distance, gaussian_kl_divergence
+from ..utils.validity import _graph_device
 
-def jsd_informativeness(graph: Data, device: torch.device | str = "cpu", aggregate: bool = True, attributes_type: str = "hard", level: str = "node") -> torch.Tensor:
+def jsd_informativeness(graph: Data, device: torch.device | str | None = None, aggregate: bool = True, attributes_type: str = "hard", level: str = "node") -> torch.Tensor:
     """
     Computes the Jensen-Shannon informativeness coefficients of the graph for discrete node labels in {1, ..., K} with either hard or soft assignments. Defined as:
 
@@ -32,6 +33,7 @@ def jsd_informativeness(graph: Data, device: torch.device | str = "cpu", aggrega
     torch.Tensor
         Jensen-Shannon coefficients for neighborhood informativeness.
     """
+    device = _graph_device(graph, device)
     if level == "class" and attributes_type == "soft":
         raise ValueError("Class-level informativity is only defined for hard node assignments")
     
@@ -128,7 +130,7 @@ def jsd_informativeness(graph: Data, device: torch.device | str = "cpu", aggrega
         else:
             return jsd_k
 
-def non_parametric_neighbor_informativeness(graph: Data, device: torch.device | str = "cpu", aggregate: bool = True) -> torch.Tensor:
+def non_parametric_neighbor_informativeness(graph: Data, device: torch.device | str | None = None, aggregate: bool = True) -> torch.Tensor:
     """
     Computes the neighborhood informativeness of a graph with continuous node attributes, through non-parametric methods.
 
@@ -153,7 +155,7 @@ def non_parametric_neighbor_informativeness(graph: Data, device: torch.device | 
     """
     raise NotImplementedError("Non-parametric neighborhood informativeness is not yet implemented. Please use the parametric method instead.")
 
-def parametric_neighbor_informativeness(graph: Data, device: torch.device | str = "cpu", aggregate: bool = True, eps: float = 1e-8, diagonal: bool = False,
+def parametric_neighbor_informativeness(graph: Data, device: torch.device | str | None = None, aggregate: bool = True, eps: float = 1e-8, diagonal: bool = False,
                                         distance: str = "KL") -> torch.Tensor:
     """
     Computes the neighborhood informativeness of a graph with continuous node attributes, through parametric methods.
@@ -183,6 +185,7 @@ def parametric_neighbor_informativeness(graph: Data, device: torch.device | str 
     torch.Tensor
         Parametric neighborhood informativeness of the graph.
     """
+    device = _graph_device(graph, device)
     attributes = graph.x.to(device = device)
     source, target = graph.edge_index.to(device)
     degrees = torch.bincount(source, minlength = graph.num_nodes)
@@ -255,7 +258,7 @@ def parametric_neighbor_informativeness(graph: Data, device: torch.device | str 
     else:
         return distance_i
 
-def continuous_neighbor_informativeness(graph: Data, device: torch.device | str = "cpu", method: str = "P", aggregate: bool = True, eps: float = 1e-8, 
+def continuous_neighbor_informativeness(graph: Data, device: torch.device | str | None = None, method: str = "P", aggregate: bool = True, eps: float = 1e-8,
                                         diagonal: bool = False, distance: str = "KL") -> torch.Tensor:
     """
     Computes the neighborhood informativeness of a graph with continuous node attributes, through non-parametric or parametric methods.
@@ -299,7 +302,7 @@ def continuous_neighbor_informativeness(graph: Data, device: torch.device | str 
     elif method == "P":
         return parametric_neighbor_informativeness(graph, device = device, aggregate = aggregate, eps = eps, diagonal = diagonal, distance = distance)
 
-def neighborhood_informativeness(graph: Data, device: torch.device | str = "cpu",
+def neighborhood_informativeness(graph: Data, device: torch.device | str | None = None,
                                  aggregate: bool = True,
                                  attributes_type: str = "hard",
                                  **kwargs) -> torch.Tensor:
@@ -326,6 +329,7 @@ def neighborhood_informativeness(graph: Data, device: torch.device | str = "cpu"
     torch.Tensor
         Neighborhood informativeness of the graph.
     """
+    device = _graph_device(graph, device)
     # Check if graph is valid
     if graph.num_nodes < 2 or graph.edge_index is None or graph.edge_index.size(1) == 0:
         return torch.tensor(torch.nan, device=device)

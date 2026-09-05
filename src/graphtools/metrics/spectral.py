@@ -4,9 +4,10 @@ from torch_geometric.data import Data
 from torch_kmeans import KMeans
 
 from ..utils.matrices import adjacency_matrix, laplacian_matrix, random_walk_matrix
+from ..utils.validity import _graph_device
 
 def spectral_decomposition(graph: Data, matrix: str = "adjacency", normalized: bool = True,
-                           device: torch.device | str = "cpu",
+                           device: torch.device | str | None = None,
                            lazy: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Computes the complete spectral decomposition of a specified matrix extracted from an undirected graph.
@@ -20,8 +21,8 @@ def spectral_decomposition(graph: Data, matrix: str = "adjacency", normalized: b
     normalized : bool
         Whether to symmetrically normalize the adjacency or Laplacian matrix
         before its spectral decomposition.
-    device : torch.device | str
-        Device to perform computations on.
+    device : torch.device | str | None, default = None
+        Device on which to perform computations. If None, infer it from the graph.
     lazy : bool
         Whether to use the lazy random walk matrix. Used only when matrix is
         "random walk".
@@ -32,6 +33,7 @@ def spectral_decomposition(graph: Data, matrix: str = "adjacency", normalized: b
         All eigenvalues in descending order and the corresponding eigenvectors
         stored column-wise.
     """
+    device = _graph_device(graph, device)
     if matrix == "adjacency":
         graph_matrix = adjacency_matrix(
             graph,
@@ -67,7 +69,7 @@ def spectral_decomposition(graph: Data, matrix: str = "adjacency", normalized: b
 
     return eigenvalues, eigenvectors
 
-def spectral_embedding(graph: Data, K: int, device: torch.device | str = "cpu", normalized: bool = True) -> torch.Tensor:
+def spectral_embedding(graph: Data, K: int, device: torch.device | str | None = None, normalized: bool = True) -> torch.Tensor:
     """
     Computes a K-dimensional spectral embedding of an undirected graph from the
     leading eigenvectors of its normalized adjacency matrix. Defined as:
@@ -85,8 +87,8 @@ def spectral_embedding(graph: Data, K: int, device: torch.device | str = "cpu", 
         Undirected graph data.
     K : int
         Number of spectral components.
-    device : torch.device | str
-        Device to perform computations on.
+    device : torch.device | str | None, default = None
+        Device on which to perform computations. If None, infer it from the graph.
     normalized : bool
         Whether to normalize spectral coordinates.
 
@@ -96,6 +98,7 @@ def spectral_embedding(graph: Data, K: int, device: torch.device | str = "cpu", 
         Degree-normalized spectral coordinates with shape (num_nodes, K), one
         row for each graph node.
     """
+    device = _graph_device(graph, device)
     if not isinstance(K, int) or isinstance(K, bool) or K < 1 or K > graph.num_nodes:
         raise ValueError("K must be an integer between 1 and graph.num_nodes")
 
@@ -125,7 +128,7 @@ def spectral_embedding(graph: Data, K: int, device: torch.device | str = "cpu", 
     return embedding
 
 
-def spectral_clustering(graph: Data, device: torch.device | str = "cpu",
+def spectral_clustering(graph: Data, device: torch.device | str | None = None,
                         K: int | None = None) -> torch.Tensor:
     """
     Cluster graph nodes using normalized-adjacency spectral embeddings.
@@ -138,8 +141,9 @@ def spectral_clustering(graph: Data, device: torch.device | str = "cpu",
     ----------
     graph : torch_geometric.data.Data
         Undirected graph to cluster.
-    device : torch.device | str, default = "cpu"
-        Device on which to perform the spectral decomposition and K-means.
+    device : torch.device | str | None, default = None
+        Device on which to perform the spectral decomposition and K-means. If
+        None, infer it from the graph.
     K : int | None, default = None
         Number of clusters. If None, determine it automatically from the
         maximum eigengap of the normalized adjacency matrix.
@@ -152,6 +156,7 @@ def spectral_clustering(graph: Data, device: torch.device | str = "cpu",
     """
     if not isinstance(graph, Data):
         raise TypeError("graph must be a torch_geometric.data.Data object")
+    device = _graph_device(graph, device)
 
     if K is None:
         eigenvalues, _ = spectral_decomposition(

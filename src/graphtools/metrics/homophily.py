@@ -1,12 +1,13 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
+from ..utils.validity import _graph_device
 
 #--------------------------------------------------
 #EDGE HOMOPHILY
 #--------------------------------------------------
 
-def hard_edge_homophily(graph: Data, device: torch.device | str = "cpu") -> torch.Tensor:
+def hard_edge_homophily(graph: Data, device: torch.device | str | None = None) -> torch.Tensor:
     """
     Computes the edge-wise homophily of an undirected graph with hard node attributes. Defined as:
 
@@ -24,6 +25,7 @@ def hard_edge_homophily(graph: Data, device: torch.device | str = "cpu") -> torc
     torch.Tensor
         Mean homophily over the graph edges.
     """
+    device = _graph_device(graph, device)
     labels = graph.x.long().to(device = device)
     source, target = graph.edge_index.to(device)
     
@@ -32,7 +34,7 @@ def hard_edge_homophily(graph: Data, device: torch.device | str = "cpu") -> torc
     
     return edge_homophily
 
-def soft_edge_homophily(graph: Data, device: torch.device | str = "cpu", eps: float = 1e-8, method: str = "jsd") -> torch.Tensor:
+def soft_edge_homophily(graph: Data, device: torch.device | str | None = None, eps: float = 1e-8, method: str = "jsd") -> torch.Tensor:
     """
     Computes the edge-wise Jensen-Shannon divergence homophily of an undirected graph with soft node attributes. Defined as:
 
@@ -63,6 +65,7 @@ def soft_edge_homophily(graph: Data, device: torch.device | str = "cpu", eps: fl
     torch.Tensor
         Mean Jensen-Shannon divergence over the graph edges.
     """
+    device = _graph_device(graph, device)
     attributes = graph.x.to(device = device, dtype = torch.float32)
     if (attributes < 0).any():
         raise ValueError("JSD requires non-negative node attribute distributions")
@@ -93,7 +96,7 @@ def soft_edge_homophily(graph: Data, device: torch.device | str = "cpu", eps: fl
 
         return jsd.mean()
 
-def continuous_edge_homophily(graph: Data, device: torch.device | str = "cpu", eps: float = 1e-8) -> torch.Tensor:
+def continuous_edge_homophily(graph: Data, device: torch.device | str | None = None, eps: float = 1e-8) -> torch.Tensor:
     """
     Computes the edge-wise homophily of an undirected graph with continuous node attributes. Defined as:
 
@@ -118,6 +121,7 @@ def continuous_edge_homophily(graph: Data, device: torch.device | str = "cpu", e
     torch.Tensor
         Mean homophily over the graph edges.
     """
+    device = _graph_device(graph, device)
     attributes = graph.x.to(device = device, dtype = torch.float32)
     standardized = (attributes - attributes.mean(dim = 0, keepdim = True)) / (attributes.std(dim = 0, keepdim = True) + eps) #Standardize features
     
@@ -130,7 +134,7 @@ def continuous_edge_homophily(graph: Data, device: torch.device | str = "cpu", e
 
     return edge_homophily
 
-def edge_homophily(graph: Data, device: torch.device | str = "cpu",
+def edge_homophily(graph: Data, device: torch.device | str | None = None,
                    attributes_type: str = "hard", **kwargs) -> torch.Tensor:
     """
     Computes the edge-wise homophily of an undirected graph depending on node attributes.
@@ -153,6 +157,7 @@ def edge_homophily(graph: Data, device: torch.device | str = "cpu",
     torch.Tensor
         Edge-wise homophily of the graph.
     """
+    device = _graph_device(graph, device)
     # Check if graph is valid
     if graph.num_nodes < 2 or graph.edge_index is None or graph.edge_index.size(1) == 0:
         return torch.tensor(torch.nan, device=device)
@@ -178,7 +183,7 @@ def edge_homophily(graph: Data, device: torch.device | str = "cpu",
 #ADJUSTED HOMOPHILY
 #--------------------------------------------------
 
-def adjusted_homophily_hard(graph: Data, device: torch.device | str = "cpu", eps: float = 1e-8) -> torch.Tensor:
+def adjusted_homophily_hard(graph: Data, device: torch.device | str | None = None, eps: float = 1e-8) -> torch.Tensor:
     """
     Computes the adjusted homophily of an undirected graph with discrete node attributes. 
     Defined as:
@@ -202,8 +207,10 @@ def adjusted_homophily_hard(graph: Data, device: torch.device | str = "cpu", eps
     torch.Tensor
         Adjusted homophily of the graph.
     """        
+    device = _graph_device(graph, device)
     # Extract data and send to device
-    labels = torch.argwhere(graph.x == 1)[:, 1].long().to(device)
+    attributes = graph.x.to(device)
+    labels = torch.argwhere(attributes == 1)[:, 1].long()
     edges = graph.edge_index.to(device)
     n = graph.num_nodes
     num_edges = edges.size(1)
@@ -228,7 +235,7 @@ def adjusted_homophily_hard(graph: Data, device: torch.device | str = "cpu", eps
 
     return H_adj
 
-def adjusted_homophily_soft(graph: Data, device: torch.device | str = "cpu", eps: float = 1e-8) -> torch.Tensor:
+def adjusted_homophily_soft(graph: Data, device: torch.device | str | None = None, eps: float = 1e-8) -> torch.Tensor:
     """
     Computes the adjusted homophily of a directed/undirected graph with soft node attributes. 
     Defined as:
@@ -252,6 +259,7 @@ def adjusted_homophily_soft(graph: Data, device: torch.device | str = "cpu", eps
     torch.Tensor
         Adjusted homophily of the graph.
     """
+    device = _graph_device(graph, device)
     if not hasattr(graph, "x") or graph.x is None:
         raise ValueError("Graph must have node attributes to compute Adjusted Homophily")
     
@@ -279,7 +287,7 @@ def adjusted_homophily_soft(graph: Data, device: torch.device | str = "cpu", eps
 
     return H_adj
 
-def adjusted_homophily(graph: Data, device: torch.device | str = "cpu",
+def adjusted_homophily(graph: Data, device: torch.device | str | None = None,
                        eps: float = 1e-8, attributes_type: str = "hard") -> torch.Tensor:
     """
     Computes the adjusted homophily of an undirected graph with hard or soft node attributes.
@@ -309,6 +317,7 @@ def adjusted_homophily(graph: Data, device: torch.device | str = "cpu",
     torch.Tensor
         Adjusted homophily of the graph.
     """
+    device = _graph_device(graph, device)
     # Check if graph is valid
     if graph.num_nodes < 2 or graph.edge_index is None or graph.edge_index.size(1) == 0:
         return torch.tensor(torch.nan, device=device)
@@ -331,7 +340,8 @@ def adjusted_homophily(graph: Data, device: torch.device | str = "cpu",
 #OTHER METRICS
 #--------------------------------------------------
 
-def dirichlet_energy(graph: Data, aggregate: bool = True) -> torch.Tensor:
+def dirichlet_energy(graph: Data, aggregate: bool = True,
+                     device: torch.device | str | None = None) -> torch.Tensor:
     """
     Computes the Dirichlet energy of an undirected graph depending on node attributes. Defined as:
 
@@ -350,8 +360,9 @@ def dirichlet_energy(graph: Data, aggregate: bool = True) -> torch.Tensor:
     torch.Tensor
         Dirichlet energy of the graph.
     """
-    x = graph.x
-    edge_index = graph.edge_index
+    device = _graph_device(graph, device)
+    x = graph.x.to(device)
+    edge_index = graph.edge_index.to(device)
     src, dst = edge_index
 
     # Compute squared Euclidean distance for each edge

@@ -1,8 +1,9 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
+from .validity import _graph_device
 
-def adjacency_matrix(graph: Data, normalized: bool = True, device: torch.device | str = "cpu",
+def adjacency_matrix(graph: Data, normalized: bool = True, device: torch.device | str | None = None,
                      sparse: bool = True) -> torch.Tensor:
     """
     Computes the adjacency matrix of a graph:
@@ -34,6 +35,7 @@ def adjacency_matrix(graph: Data, normalized: bool = True, device: torch.device 
     torch.Tensor
         Dense or sparse COO adjacency matrix of shape (num_nodes, num_nodes).
     """
+    device = _graph_device(graph, device)
     num_nodes = graph.num_nodes
     if num_nodes < 2:  # Nan values for graphs with less than 2 nodes
         raise ValueError("Graph must have at least 2 nodes")
@@ -92,7 +94,7 @@ def adjacency_matrix(graph: Data, normalized: bool = True, device: torch.device 
 
     return adjacency
 
-def laplacian_matrix(graph: Data, normalized: bool = True, device: torch.device | str = "cpu",
+def laplacian_matrix(graph: Data, normalized: bool = True, device: torch.device | str | None = None,
                      sparse: bool = True) -> torch.Tensor:
     """
     Computes the Laplacian matrix of a graph. Defined as:
@@ -119,6 +121,7 @@ def laplacian_matrix(graph: Data, normalized: bool = True, device: torch.device 
     torch.Tensor
         Dense or sparse COO Laplacian matrix of shape (num_nodes, num_nodes).
     """
+    device = _graph_device(graph, device)
     adjacency = adjacency_matrix(graph, normalized = False, device = device, sparse = sparse)
     num_nodes = graph.num_nodes
 
@@ -169,7 +172,7 @@ def laplacian_matrix(graph: Data, normalized: bool = True, device: torch.device 
 
     return laplacian
 
-def random_walk_matrix(graph: Data, device: torch.device | str = "cpu",
+def random_walk_matrix(graph: Data, device: torch.device | str | None = None,
                        sparse: bool = True, lazy: bool = True) -> torch.Tensor:
     """
     Computes the random walk transition matrix of a graph. Defined as:
@@ -199,6 +202,7 @@ def random_walk_matrix(graph: Data, device: torch.device | str = "cpu",
         In the non-lazy case, rows associated with isolated nodes contain only
         zeros.
     """
+    device = _graph_device(graph, device)
     adjacency = adjacency_matrix(graph, normalized = False, device = device, sparse = sparse)
     num_nodes = graph.num_nodes
 

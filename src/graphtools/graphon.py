@@ -63,8 +63,9 @@ def sample_graph(n: int, device: torch.device | str = "cpu",
     edge_index = sample_edges(
         n = n,
         structure = structure,
+        device = device,
         **structure_kwargs,
-    ).to(device)
+    )
 
     graph = Data(
         edge_index = edge_index,

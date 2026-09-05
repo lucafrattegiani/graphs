@@ -1,6 +1,20 @@
 #Torch data and computations
 import torch
 
+
+def _graph_device(graph, device: torch.device | str | None = None) -> torch.device:
+    """Return an explicit device or infer it from a graph tensor."""
+    if device is not None:
+        return torch.device(device)
+
+    for attribute in ("edge_index", "x", "pos"):
+        value = getattr(graph, attribute, None)
+        if isinstance(value, torch.Tensor):
+            return value.device
+
+    return torch.device("cpu")
+
+
 def _validate_size(value: int, name: str) -> None:
     """Validate a positive integer size parameter."""
     if not isinstance(value, int) or isinstance(value, bool):
