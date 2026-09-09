@@ -247,7 +247,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     # at a higher z-order below, so the lines never cover their markers.
     edge_alpha = min(0.8, max(0.15, 2000.0 / max(num_edges, 1)))
     edge_width = min(1.5, max(0.3, 600.0 / max(num_edges, 1)))
-    node_size = max(35, max(3, 1000.0 / num_nodes))
+    node_size = max(70, 1800.0 / num_nodes)
 
     finite_nodes = nodes[np.isfinite(nodes).all(axis = 1)]
     if len(finite_nodes) == 0:
