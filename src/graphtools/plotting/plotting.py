@@ -17,6 +17,7 @@ _VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
 _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
 _GRAPH_EDGE_COLOR = "black"
+_GRAPH_NODE_COLOR = "red"
 _GRAPH_EDGE_ZORDER = 1
 _GRAPH_NODE_ZORDER = 2
 
@@ -302,6 +303,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
             nodes[:, 0],
             nodes[:, 1],
             s = node_size,
+            color = _GRAPH_NODE_COLOR,
             zorder = _GRAPH_NODE_ZORDER,
         )
     else:
@@ -350,7 +352,6 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     voronoi : bool, default = False
         Whether to draw the Voronoi cells stored in ``graph.cells`` behind
         the graph.
-
     Returns
     -------
     None
@@ -365,7 +366,6 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         raise TypeError("title must be a string")
     if not isinstance(voronoi, bool):
         raise TypeError("voronoi must be a boolean")
-
     positions = getattr(graph, "pos", None)
     if positions is None or (isinstance(positions, torch.Tensor) and positions.numel() == 0):
         standalone = ax is None
@@ -476,7 +476,6 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
     voronoi : bool, default = False
         Whether to draw the Voronoi cells stored in ``graph.cells`` behind
         the spatial representation.
-
     Returns
     -------
     None
@@ -486,7 +485,6 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         raise TypeError("graph must be a torch_geometric.data.Data object")
     if not isinstance(voronoi, bool):
         raise TypeError("voronoi must be a boolean")
-
     edge_index = getattr(graph, "edge_index", None)
     if edge_index is None or edge_index.numel() == 0:
         num_edges = 0
