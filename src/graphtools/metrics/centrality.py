@@ -184,7 +184,7 @@ def centrality(graph: Data, method: str, device: torch.device | str | None = Non
     graph : torch_geometric.data.Data
         Graph data.
     method : str
-        Centrality method to use: {"betwenness", "harmonic", "pagerank"}.
+        Centrality method to use: {"betweenness", "harmonic", "pagerank"}.
     device : torch.device | str
         Device to perform computations on.
     centralization : str
@@ -200,21 +200,15 @@ def centrality(graph: Data, method: str, device: torch.device | str | None = Non
     torch.Tensor
         The node-level centrality values or the requested graph-level
         centralization.
-
-    Examples
-    --------
-    ``centrality(graph, "betwenness", normalized = False)``
-
-    ``centrality(graph, "pagerank", alpha = 0.9, directed = True)``
     """
     centrality_functions = {
-        "betwenness": betweenness_centrality,
+        "betweenness": betweenness_centrality,
         "harmonic": harmonic_centrality,
         "pagerank": pagerank_centrality,
     }
     if method not in centrality_functions:
         raise ValueError(
-            "method must be one of {'betwenness', 'harmonic', 'pagerank'}"
+            "method must be one of {'betweenness', 'harmonic', 'pagerank'}"
         )
 
     return centrality_functions[method](

@@ -16,6 +16,9 @@ _VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.65)
 _VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
 _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
+_GRAPH_EDGE_COLOR = "black"
+_GRAPH_EDGE_ZORDER = 1
+_GRAPH_NODE_ZORDER = 2
 
 def rescale(positions: torch.Tensor, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
     """
@@ -240,8 +243,10 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         segments = np.empty((0, 2, 2))
         num_edges = 0
 
-    edge_alpha = min(0.35, max(0.015, 800.0 / max(num_edges, 1)))
-    edge_width = min(0.6, max(0.08, 200.0 / max(num_edges, 1)))
+    # Keep connections clearly visible even for dense graphs. Nodes are drawn
+    # at a higher z-order below, so the lines never cover their markers.
+    edge_alpha = min(0.8, max(0.15, 2000.0 / max(num_edges, 1)))
+    edge_width = min(1.5, max(0.3, 600.0 / max(num_edges, 1)))
     node_size = max(35, max(3, 1000.0 / num_nodes))
 
     finite_nodes = nodes[np.isfinite(nodes).all(axis = 1)]
@@ -285,15 +290,20 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         ax.add_collection(
             LineCollection(
                 segments,
-                colors = "black",
+                colors = _GRAPH_EDGE_COLOR,
                 linewidths = edge_width,
                 alpha = edge_alpha,
-                zorder = 1,
+                zorder = _GRAPH_EDGE_ZORDER,
             )
         )
 
     if labels is None:
-        ax.scatter(nodes[:, 0], nodes[:, 1], s = node_size)
+        ax.scatter(
+            nodes[:, 0],
+            nodes[:, 1],
+            s = node_size,
+            zorder = _GRAPH_NODE_ZORDER,
+        )
     else:
         unique_labels = np.unique(labels)
         color_map = plt.get_cmap("tab10" if len(unique_labels) <= 10 else "tab20")
@@ -306,6 +316,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                 s = node_size,
                 color = color_map(color_index % color_map.N),
                 label = str(class_id),
+                zorder = _GRAPH_NODE_ZORDER,
             )
 
         ax.legend(title = "Labels")
