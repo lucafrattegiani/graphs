@@ -10,9 +10,10 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
+from matplotlib.patches import Rectangle
 from ..utils.matrices import adjacency_matrix
 
-_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.65)
+_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.8)
 _VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
 _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
@@ -84,9 +85,18 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
     else:
         fig = ax.figure
 
-    # Standard Voronoi cells cover the whole plane. Coloring the axes gives
-    # both finite and infinite cells the same fill used by epsilon-Voronoi.
-    ax.set_facecolor(_VORONOI_FACE_COLOR)
+    # Standard cells cover the whole plane, including infinite regions.
+    # Use a separate patch: axis("off") hides the axes' own facecolor.
+    # Axes coordinates keep the fill aligned when plot_positions changes limits.
+    ax.add_artist(
+        Rectangle(
+            (0, 0), 1, 1,
+            transform = ax.transAxes,
+            facecolor = _VORONOI_FACE_COLOR,
+            edgecolor = "none",
+            zorder = 0,
+        )
+    )
 
     voronoi_plot_2d(
         voronoi,
@@ -151,7 +161,6 @@ def plot_epsilon_voronoi(cells: list[Polygon],
             facecolor = _VORONOI_FACE_COLOR,
             edgecolor = _VORONOI_EDGE_COLOR,
             linewidth = _VORONOI_EDGE_WIDTH,
-            alpha = _VORONOI_EDGE_ALPHA,
         )
 
     ax.set_title(title)
