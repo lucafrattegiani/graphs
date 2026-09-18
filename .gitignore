@@ -5,6 +5,7 @@ __pycache__/
 
 # Files
 .DS_Store
+Icon?
 
 # Notebooks
 .ipynb_checkpoints/

@@ -19,6 +19,7 @@ _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
 _GRAPH_EDGE_COLOR = "black"
 _GRAPH_NODE_COLOR = "red"
+_GRAPH_NODE_FACE_ALPHA = 1
 _GRAPH_EDGE_ZORDER = 1
 _GRAPH_NODE_ZORDER = 2
 
@@ -177,7 +178,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                    directed: bool = False, title: str = "", ax: Axes | None = None,
                    labels: torch.Tensor | None = None,
                    voronoi: Voronoi | list[Polygon] | None = None) -> None:
-    """Plot two-dimensional spatial positions and their optional connections.
+    """Plot two-dimensional positions with translucent fills and opaque borders.
 
     Parameters
     ----------
@@ -312,7 +313,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
             nodes[:, 0],
             nodes[:, 1],
             s = node_size,
-            color = _GRAPH_NODE_COLOR,
+            facecolors = to_rgba(_GRAPH_NODE_COLOR, alpha = _GRAPH_NODE_FACE_ALPHA),
+            edgecolors = _GRAPH_NODE_COLOR,
             zorder = _GRAPH_NODE_ZORDER,
         )
     else:
@@ -321,11 +323,13 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
 
         for color_index, class_id in enumerate(unique_labels):
             class_nodes = labels == class_id
+            class_color = color_map(color_index % color_map.N)
             ax.scatter(
                 nodes[class_nodes, 0],
                 nodes[class_nodes, 1],
                 s = node_size,
-                color = color_map(color_index % color_map.N),
+                facecolors = to_rgba(class_color, alpha = _GRAPH_NODE_FACE_ALPHA),
+                edgecolors = class_color,
                 label = str(class_id),
                 zorder = _GRAPH_NODE_ZORDER,
             )
