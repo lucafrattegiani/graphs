@@ -178,7 +178,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                    directed: bool = False, title: str = "", ax: Axes | None = None,
                    labels: torch.Tensor | None = None,
                    voronoi: Voronoi | list[Polygon] | None = None,
-                   node_size: float | None = None) -> None:
+                   node_size: float | None = None,
+                   names_labels: list[str] | None = None) -> None:
     """Plot two-dimensional positions with translucent fills and opaque borders.
 
     Parameters
@@ -204,6 +205,9 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
+    names_labels : list[str] | None, default = None
+        Optional names shown in the legend, ordered according to the sorted
+        unique values in ``labels``.
 
     Returns
     -------
@@ -235,6 +239,15 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         ):
             raise TypeError("labels must contain integers")
         labels = labels.detach().cpu().numpy()
+
+    unique_labels = np.unique(labels) if labels is not None else np.empty(0)
+    if names_labels is not None:
+        if not all(isinstance(name, str) for name in names_labels):
+            raise TypeError("names_labels must contain only strings")
+        if len(names_labels) != len(unique_labels):
+            raise ValueError(
+                "names_labels must contain one name for each unique label"
+            )
 
     if edge_index is not None and edge_index.numel() > 0:
         links = edge_index.detach().cpu().numpy()
@@ -323,7 +336,6 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
             zorder = _GRAPH_NODE_ZORDER,
         )
     else:
-        unique_labels = np.unique(labels)
         color_map = plt.get_cmap("tab10" if len(unique_labels) <= 10 else "tab20")
 
         for color_index, class_id in enumerate(unique_labels):
@@ -335,7 +347,11 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                 s = node_size,
                 facecolors = to_rgba(class_color, alpha = _GRAPH_NODE_FACE_ALPHA),
                 edgecolors = class_color,
-                label = str(class_id),
+                label = (
+                    names_labels[color_index]
+                    if names_labels is not None
+                    else str(class_id)
+                ),
                 zorder = _GRAPH_NODE_ZORDER,
             )
 
@@ -353,7 +369,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
 
 
 def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
-               voronoi: bool = False, node_size: float | None = None) -> None:
+               voronoi: bool = False, node_size: float | None = None,
+               names_labels: list[str] | None = None) -> None:
     """Plot a graph using the spatial coordinates stored in ``graph.pos``.
 
     Parameters
@@ -373,6 +390,9 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
+    names_labels : list[str] | None, default = None
+        Optional names shown in the legend, ordered according to the sorted
+        unique values in ``graph.labels``.
 
     Returns
     -------
@@ -427,6 +447,7 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         labels = getattr(graph, "labels", None),
         voronoi = cells,
         node_size = node_size,
+        names_labels = names_labels,
     )
 
 
@@ -483,7 +504,8 @@ def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] 
 
 def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
                figsize: tuple[float, float] = (15, 7),
-               voronoi: bool = False, node_size: float | None = None) -> None:
+               voronoi: bool = False, node_size: float | None = None,
+               names_labels: list[str] | None = None) -> None:
     """Plot a graph's adjacency matrix and spatial representation side by side.
 
     Parameters
@@ -502,6 +524,9 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
+    names_labels : list[str] | None, default = None
+        Optional names shown in the graph legend, ordered according to the
+        sorted unique values in ``graph.labels``.
 
     Returns
     -------
@@ -539,6 +564,7 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         ax = axes[1],
         voronoi = voronoi,
         node_size = node_size,
+        names_labels = names_labels,
     )
 
     overall_title = title or f"n={graph.num_nodes}, edges={num_edges}"
