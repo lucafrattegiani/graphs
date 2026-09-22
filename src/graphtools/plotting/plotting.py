@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
+from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from ..utils.matrices import adjacency_matrix
 
@@ -22,6 +23,7 @@ _GRAPH_NODE_COLOR = "red"
 _GRAPH_NODE_FACE_ALPHA = 1
 _GRAPH_EDGE_ZORDER = 1
 _GRAPH_NODE_ZORDER = 2
+_GRAPH_LEGEND_MARKER_SIZE = 8
 
 def rescale(positions: torch.Tensor, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
     """
@@ -337,25 +339,37 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         )
     else:
         color_map = plt.get_cmap("tab10" if len(unique_labels) <= 10 else "tab20")
+        legend_handles = []
 
         for color_index, class_id in enumerate(unique_labels):
             class_nodes = labels == class_id
             class_color = color_map(color_index % color_map.N)
+            class_name = (
+                names_labels[color_index]
+                if names_labels is not None
+                else str(class_id)
+            )
             ax.scatter(
                 nodes[class_nodes, 0],
                 nodes[class_nodes, 1],
                 s = node_size,
                 facecolors = to_rgba(class_color, alpha = _GRAPH_NODE_FACE_ALPHA),
                 edgecolors = class_color,
-                label = (
-                    names_labels[color_index]
-                    if names_labels is not None
-                    else str(class_id)
-                ),
                 zorder = _GRAPH_NODE_ZORDER,
             )
+            legend_handles.append(
+                Line2D(
+                    [], [],
+                    marker = "o",
+                    linestyle = "none",
+                    markersize = _GRAPH_LEGEND_MARKER_SIZE,
+                    markerfacecolor = class_color,
+                    markeredgecolor = class_color,
+                    label = class_name,
+                )
+            )
 
-        ax.legend(title = "Labels")
+        ax.legend(handles = legend_handles, title = "Labels")
 
     plot_title = title or f"n={num_nodes}, edges={num_edges}"
     ax.set_title(plot_title)
