@@ -177,7 +177,8 @@ def plot_epsilon_voronoi(cells: list[Polygon],
 def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = None,
                    directed: bool = False, title: str = "", ax: Axes | None = None,
                    labels: torch.Tensor | None = None,
-                   voronoi: Voronoi | list[Polygon] | None = None) -> None:
+                   voronoi: Voronoi | list[Polygon] | None = None,
+                   node_size: float | None = None) -> None:
     """Plot two-dimensional positions with translucent fills and opaque borders.
 
     Parameters
@@ -200,6 +201,9 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     voronoi : scipy.spatial.Voronoi | list[shapely.geometry.Polygon] | None, default = None
         Optional standard or epsilon-Voronoi tessellation to draw behind the
         positions.
+    node_size : float | None, default = None
+        Node marker area in points squared. If None, use
+        ``max(70, 1800.0 / num_nodes)``.
 
     Returns
     -------
@@ -258,7 +262,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     # at a higher z-order below, so the lines never cover their markers.
     edge_alpha = min(0.8, max(0.15, 2000.0 / max(num_edges, 1)))
     edge_width = min(1.5, max(0.3, 600.0 / max(num_edges, 1)))
-    node_size = max(70, 1800.0 / num_nodes)
+    if node_size is None:
+        node_size = max(70, 1800.0 / num_nodes)
 
     finite_nodes = nodes[np.isfinite(nodes).all(axis = 1)]
     if len(finite_nodes) == 0:
@@ -348,7 +353,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
 
 
 def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
-               voronoi: bool = False) -> None:
+               voronoi: bool = False, node_size: float | None = None) -> None:
     """Plot a graph using the spatial coordinates stored in ``graph.pos``.
 
     Parameters
@@ -365,6 +370,10 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     voronoi : bool, default = False
         Whether to draw the Voronoi cells stored in ``graph.cells`` behind
         the graph.
+    node_size : float | None, default = None
+        Node marker area in points squared. If None, use
+        ``max(70, 1800.0 / num_nodes)``.
+
     Returns
     -------
     None
@@ -417,6 +426,7 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         ax = ax,
         labels = getattr(graph, "labels", None),
         voronoi = cells,
+        node_size = node_size,
     )
 
 
@@ -473,7 +483,7 @@ def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] 
 
 def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
                figsize: tuple[float, float] = (15, 7),
-               voronoi: bool = False) -> None:
+               voronoi: bool = False, node_size: float | None = None) -> None:
     """Plot a graph's adjacency matrix and spatial representation side by side.
 
     Parameters
@@ -489,6 +499,10 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
     voronoi : bool, default = False
         Whether to draw the Voronoi cells stored in ``graph.cells`` behind
         the spatial representation.
+    node_size : float | None, default = None
+        Node marker area in points squared. If None, use
+        ``max(70, 1800.0 / num_nodes)``.
+
     Returns
     -------
     None
@@ -524,6 +538,7 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         title = " ",
         ax = axes[1],
         voronoi = voronoi,
+        node_size = node_size,
     )
 
     overall_title = title or f"n={graph.num_nodes}, edges={num_edges}"
