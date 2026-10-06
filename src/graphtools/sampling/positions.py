@@ -3,7 +3,7 @@ import torch
 from torch_geometric.data import Data
 
 #Clustering
-from ..metrics.spectral import spectral_clustering
+from .._metrics.spectral import spectral_clustering
 
 #Polygonal structure
 def polygonal(n: int, device: torch.device | str = "cpu", radius: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:

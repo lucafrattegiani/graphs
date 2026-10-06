@@ -2,7 +2,7 @@
 
 PyTorch and PyTorch Geometric based package for:
 - Graphon sampling (module ```graphon```)
-- Network analysis (module ```stats```)
+- Network analysis (module ```metrics```)
 - Graph construction (module ```builder```)
 
 ## Dependency management
@@ -76,7 +76,7 @@ installation command is sufficient.
 ## Import package
 
 ```python
-from graphtools import graphon, stats, builder
+from graphtools import graphon, metrics, builder
 ```
 
 ## Package update

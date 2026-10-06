@@ -7,7 +7,7 @@ from torch_geometric.data import Data
 #--------------------------------------------------
 #GRAPH CONSTRUCTION
 #--------------------------------------------------
-from .building.edges import epsilon_voronoi, voronoi
+from ._builder.edges import epsilon_voronoi, voronoi
 
 def build_graph(positions: torch.Tensor, method: str = "voronoi",
                 add_voronoi: bool = True,
