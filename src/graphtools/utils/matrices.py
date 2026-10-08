@@ -1,9 +1,141 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
+import networkx as nx
 from .validity import _graph_device
 
-def adjacency_matrix(graph: Data, normalized: bool = True, device: torch.device | str | None = None,
+def inverse_shortest_path_matrix(graph: Data, device: torch.device | str | None = None,
+                          sparse: bool = True) -> torch.Tensor:
+    """
+    Computes structural similarity between nodes according to shortest path distances.
+
+    C_ij = 1 / (1 + d_ij) for connected pairs of nodes.
+    C_ij = 0 for disconnected pairs of nodes.
+    C_ii = 1 
+
+    Parameters:
+    ----------
+    graph : torch_geometric.data.Data
+        Graph data. Edge directions and weights are ignored.
+    device : torch.device | str | None
+        Output device. If None, infer it from the graph tensors.
+        Shortest path distances are computed on the CPU.
+    sparse : bool
+        Whether to return a sparse tensor. If False, returns a dense tensor.
+
+    Returns:
+    -------
+    torch.Tensor
+        Float32 dense or sparse COO matrix of shape (num_nodes, num_nodes).
+        The sparse output is coalesced and stores only connected pairs,
+        including the diagonal.
+    """
+    device = _graph_device(graph, device)
+    num_nodes = graph.num_nodes
+    graph_nx = nx.Graph()
+    graph_nx.add_nodes_from(range(num_nodes))
+    if graph.edge_index is not None:
+        graph_nx.add_edges_from(graph.edge_index.detach().cpu().t().tolist())
+
+    if sparse:
+        rows, columns, values = [], [], []
+    else:
+        matrix = torch.zeros((num_nodes, num_nodes), dtype = torch.float32)
+
+    for source, distances in nx.all_pairs_shortest_path_length(graph_nx):
+        targets = list(distances)
+        inverse_distances = [1.0 / (1 + distances[target]) for target in targets]
+        if sparse:
+            rows.extend([source] * len(targets))
+            columns.extend(targets)
+            values.extend(inverse_distances)
+        else:
+            matrix[source, targets] = torch.tensor(inverse_distances, dtype = torch.float32)
+
+    if sparse:
+        indices = torch.tensor([rows, columns], dtype = torch.long, device = device)
+        values = torch.tensor(values, dtype = torch.float32, device = device)
+        with torch.sparse.check_sparse_tensor_invariants(enable = True):
+            matrix = torch.sparse_coo_tensor(
+                indices,
+                values,
+                size = (num_nodes, num_nodes),
+                device = device,
+            ).coalesce()
+
+    return matrix.to(device)
+
+def jaccard_similarity_matrix(graph: Data, device: torch.device | str | None = None,
+                              sparse: bool = True) -> torch.Tensor:
+    """
+    Computes the Jaccard similarity between node neighborhoods.
+
+    C_ij = |N(i) intersection N(j)| / |N(i) union N(j)|
+
+    Parameters:
+    ----------
+    graph : torch_geometric.data.Data
+        Graph data. Edge directions, weights, duplicates and self-loops
+        do not affect the neighborhoods.
+    device : torch.device | str | None
+        Output device. If None, infer it from the graph tensors.
+        Neighborhood similarities are computed on the CPU.
+    sparse : bool
+        Whether to return a sparse tensor. If False, returns a dense tensor.
+
+    Returns:
+    -------
+    torch.Tensor
+        Float32 dense or coalesced sparse COO matrix of shape
+        (num_nodes, num_nodes). Sparse output stores only nonzero entries.
+    """
+    device = _graph_device(graph, device)
+    num_nodes = graph.num_nodes
+    neighbors = [set() for _ in range(num_nodes)]
+    if graph.edge_index is not None:
+        for source, target in graph.edge_index.detach().cpu().t().tolist():
+            if source != target:
+                neighbors[source].add(target)
+                neighbors[target].add(source)
+    degrees = [len(neighborhood) for neighborhood in neighbors]
+
+    if sparse:
+        rows, columns, values = [], [], []
+    else:
+        matrix = torch.zeros((num_nodes, num_nodes), dtype = torch.float32)
+
+    for source, neighborhood in enumerate(neighbors):
+        # Count common neighbors only for pairs with a nonempty intersection.
+        common_counts = {}
+        for neighbor in neighborhood:
+            for target in neighbors[neighbor]:
+                common_counts[target] = common_counts.get(target, 0) + 1
+        targets = list(common_counts)
+        similarities = [
+            common_counts[target] / (degrees[source] + degrees[target] - common_counts[target])
+            for target in targets
+        ]
+        if sparse:
+            rows.extend([source] * len(targets))
+            columns.extend(targets)
+            values.extend(similarities)
+        elif targets:
+            matrix[source, targets] = torch.tensor(similarities, dtype = torch.float32)
+
+    if sparse:
+        indices = torch.tensor([rows, columns], dtype = torch.long, device = device)
+        values = torch.tensor(values, dtype = torch.float32, device = device)
+        with torch.sparse.check_sparse_tensor_invariants(enable = True):
+            matrix = torch.sparse_coo_tensor(
+                indices,
+                values,
+                size = (num_nodes, num_nodes),
+                device = device,
+            ).coalesce()
+
+    return matrix.to(device)
+
+def adjacency_matrix(graph: Data, normalized: bool = False, device: torch.device | str | None = None,
                      sparse: bool = True) -> torch.Tensor:
     """
     Computes the adjacency matrix of a graph:

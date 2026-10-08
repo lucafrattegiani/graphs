@@ -337,7 +337,7 @@ def adjusted_homophily(graph: Data, device: torch.device | str | None = None,
     )
 
 #--------------------------------------------------
-#OTHER METRICS
+#LABEL SMOOTHNESS
 #--------------------------------------------------
 
 def dirichlet_energy(graph: Data, aggregate: bool = True,

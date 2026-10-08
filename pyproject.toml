@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib",
     "networkx",
     "numpy",
+    "POT>=0.9.7",
     "scipy",
     "shapely>=2.1",
     "torch",

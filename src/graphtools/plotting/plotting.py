@@ -12,6 +12,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from ..utils.matrices import adjacency_matrix
 
 _VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.8)
@@ -382,6 +383,115 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         plt.show()
 
 
+def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
+                        title: str = "Node alignment", figsize: tuple[float, float] = (12, 6),
+                        ax: Axes | None = None, node_size: float | None = None,
+                        linewidth: float = 2.0) -> None:
+    """Plot two graphs' node positions and the coupling between their nodes.
+
+    Parameters
+    ----------
+    graph_1, graph_2 : torch_geometric.data.Data
+        Graphs with spatial coordinates in ``pos`` of shape (num_nodes, 2).
+        Copies of the positions are vertically centered and separated
+        horizontally, preserving each graph's geometry and scale.
+    coupling : torch.Tensor
+        Coupling matrix of shape (graph_1.num_nodes, graph_2.num_nodes).
+        Entries must be finite and non-negative, with total mass one.
+        Row sums must match graph_1.h and column sums graph_2.h, using
+        uniform node probabilities when h is absent or None. Comparisons
+        use rtol=1e-5 and atol=1e-8 to allow floating-point rounding errors.
+        Positive entries are drawn as connections; zero entries are omitted.
+    title : str, default = "Node alignment"
+        Title displayed above the plot.
+    figsize : tuple[float, float], default = (12, 6)
+        Figure width and height in inches, used when ``ax`` is None.
+    ax : matplotlib.axes.Axes | None, default = None
+        Axes on which to draw. If None, create and display a new figure.
+    node_size : float | None, default = None
+        Node marker area in points squared, passed to ``plot_positions``.
+    linewidth : float, default = 2.0
+        Width in points of the strongest connection. Other widths are
+        proportional to their coupling value relative to the maximum.
+
+    Returns
+    -------
+    None
+        Draws the node alignment without visible axes. Graph positions are
+        not modified. The figure is displayed only when ``ax`` is None.
+
+    Raises
+    ------
+    ValueError
+        If the coupling has invalid dimensions, entries, mass or marginals,
+        or a graph histogram is not a probability vector of the right size.
+    """
+    # Validate the coupling before creating a figure or drawing on supplied axes.
+    if not isinstance(coupling, torch.Tensor) or coupling.is_complex():
+        raise TypeError("coupling must be a real torch.Tensor")
+    expected_shape = (graph_1.num_nodes, graph_2.num_nodes)
+    if coupling.shape != expected_shape:
+        raise ValueError(f"coupling must have shape {expected_shape}, got {tuple(coupling.shape)}")
+    weights = coupling.detach().to(device = "cpu", dtype = torch.float64)
+    if weights.layout != torch.strided:
+        weights = weights.to_dense()
+    if not torch.isfinite(weights).all() or (weights < 0).any():
+        raise ValueError("coupling entries must be finite and non-negative")
+    if not torch.isclose(weights.sum(), weights.new_tensor(1.0), rtol = 1e-5, atol = 1e-8):
+        raise ValueError("coupling entries must sum to one")
+
+    for index, (graph, marginal) in enumerate(
+        ((graph_1, weights.sum(dim = 1)), (graph_2, weights.sum(dim = 0))), start = 1
+    ):
+        histogram = getattr(graph, "h", None)
+        if histogram is None:
+            histogram = weights.new_full((graph.num_nodes,), 1.0 / graph.num_nodes)
+        else:
+            histogram = torch.as_tensor(histogram, device = "cpu", dtype = weights.dtype)
+            if histogram.shape != (graph.num_nodes,):
+                raise ValueError(f"graph_{index}.h must have shape ({graph.num_nodes},)")
+            if not torch.isfinite(histogram).all() or (histogram < 0).any():
+                raise ValueError(f"graph_{index}.h must contain finite non-negative probabilities")
+            if not torch.isclose(histogram.sum(), weights.new_tensor(1.0), rtol = 1e-5, atol = 1e-8):
+                raise ValueError(f"graph_{index}.h probabilities must sum to one")
+        if not torch.allclose(marginal, histogram, rtol = 1e-5, atol = 1e-8):
+            axis = "Row" if index == 1 else "Column"
+            raise ValueError(f"{axis} sums of coupling must match graph_{index}'s node histogram")
+
+    positions = [graph.pos.detach().cpu().clone() for graph in (graph_1, graph_2)]
+    for pos in positions:
+        pos[:, 0] -= pos[:, 0].min()
+        pos[:, 1] -= (pos[:, 1].min() + pos[:, 1].max()) / 2
+    span = max(float((pos.amax(dim = 0) - pos.amin(dim = 0)).max()) for pos in positions)
+    positions[1][:, 0] += positions[0][:, 0].max() + 0.3 * max(span, 1.0)
+
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize = figsize)
+    else:
+        fig = ax.figure
+
+    # Plot both sets together so that plot_positions fits the full layout.
+    labels = torch.cat([torch.full((len(pos),), index, dtype = torch.long)
+                        for index, pos in enumerate(positions)])
+    plot_positions(torch.cat(positions), ax = ax, title = title, labels = labels,
+                   node_size = node_size, names_labels = ["Graph 1", "Graph 2"])
+    ax.get_legend().set_title("")
+
+    source, target = torch.nonzero(weights > 0, as_tuple = True)
+    if source.numel() > 0:
+        segments = torch.stack([positions[0][source], positions[1][target]], dim = 1)
+        widths = linewidth * weights[source, target] / weights.max()
+        ax.add_collection(LineCollection(segments.numpy(), linewidths = widths.numpy(),
+                                         colors = "gray", alpha = 0.6,
+                                         zorder = _GRAPH_EDGE_ZORDER))
+    ax.axis("off")
+
+    if standalone:
+        fig.tight_layout()
+        plt.show()
+
+
 def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
                voronoi: bool = False, node_size: float | None = None,
                names_labels: list[str] | None = None) -> None:
@@ -466,7 +576,7 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
 
 
 def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] = (7, 7),
-                 ax: Axes | None = None) -> None:
+                 ax: Axes | None = None, show_marginals: bool = False) -> None:
     """
     Plots a matrix as a heatmap.
 
@@ -482,6 +592,10 @@ def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] 
     ax : matplotlib.axes.Axes | None, default = None
         Axes on which to draw the heatmap. If None, a new figure is created
         and displayed.
+    show_marginals : bool, default = False
+        Plot column sums as vertical bars above the heatmap and row sums as
+        horizontal bars to its left. Each bar is aligned with its matrix
+        column or row and shows the actual sum, without normalization.
 
     Returns:
     -------
@@ -509,11 +623,94 @@ def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] 
     ax.set_title(title)
     ax.set_xlabel("Nodes")
     ax.set_ylabel("Nodes")
-    fig.colorbar(image, ax = ax, fraction = 0.046, pad = 0.04)
+
+    if show_marginals:
+        # Keep the marginal bars aligned with the heatmap cells.
+        divider = make_axes_locatable(ax)
+        ax_top = divider.append_axes("top", size = "25%", pad = 0.15, sharex = ax)
+        ax_left = divider.append_axes("left", size = "25%", pad = 0.65, sharey = ax)
+        ax_colorbar = divider.append_axes("right", size = "5%", pad = 0.15)
+
+        num_rows, num_columns = matrix_values.shape
+        ax_top.bar(np.arange(num_columns), matrix_values.sum(axis = 0),
+                   width = 1.0, color = "lightcoral", edgecolor = "black", linewidth = 0.5)
+        ax_left.barh(np.arange(num_rows), matrix_values.sum(axis = 1),
+                     height = 1.0, color = "lightsteelblue", edgecolor = "black", linewidth = 0.5)
+        ax_left.invert_xaxis()
+        ax.set_xlim(-0.5, num_columns - 0.5)
+        ax.set_ylim(num_rows - 0.5, -0.5)
+
+        ax.set_title("")
+        ax_top.set_title(title)
+        for marginal_ax in (ax_top, ax_left):
+            marginal_ax.set_axis_off()
+
+        fig.colorbar(image, cax = ax_colorbar)
+    else:
+        fig.colorbar(image, ax = ax, fraction = 0.046, pad = 0.04)
 
     if standalone:
         fig.tight_layout()
         plt.show()
+
+
+def plot_coupling(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
+                  title: str = "Coupling", figsize: tuple[float, float] = (15, 7),
+                  node_size: float | None = None, linewidth: float = 2.0,
+                  show_marginals: bool = False) -> None:
+    """Plot a coupling heatmap and node alignment side by side.
+
+    Parameters
+    ----------
+    graph_1, graph_2 : torch_geometric.data.Data
+        Graphs with spatial coordinates in ``pos`` of shape (num_nodes, 2).
+    coupling : torch.Tensor
+        Coupling matrix of shape (graph_1.num_nodes, graph_2.num_nodes).
+        Validated by ``plot_node_alignment``: finite non-negative entries,
+        total mass one, and marginals matching each graph's ``h`` or uniform
+        node probabilities when ``h`` is absent or None.
+    title : str, default = "Coupling"
+        Overall figure title.
+    figsize : tuple[float, float], default = (15, 7)
+        Figure width and height in inches.
+    node_size : float | None, default = None
+        Node marker area in points squared, passed to ``plot_node_alignment``.
+    linewidth : float, default = 2.0
+        Width in points of the strongest connection. Other widths are
+        proportional to their coupling values.
+    show_marginals : bool, default = False
+        Whether to show column and row sums above and beside the heatmap.
+
+    Returns
+    -------
+    None
+        Displays one figure with the heatmap on the left and node alignment
+        on the right. The input graphs and coupling are not modified.
+    """
+    fig, axes = plt.subplots(1, 2, figsize = figsize)
+    try:
+        # Validate the coupling through the alignment plot before drawing its heatmap.
+        plot_node_alignment(
+            graph_1, graph_2, coupling,
+            title = "Node alignment",
+            ax = axes[1],
+            node_size = node_size,
+            linewidth = linewidth,
+        )
+        matrix = coupling.to_dense() if coupling.layout != torch.strided else coupling
+        plot_heatmap(
+            matrix,
+            title = "Coupling matrix",
+            ax = axes[0],
+            show_marginals = show_marginals,
+        )
+    except Exception:
+        plt.close(fig)
+        raise
+
+    fig.suptitle(title)
+    fig.tight_layout(rect = (0, 0, 1, 0.95))
+    plt.show()
 
 
 def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
