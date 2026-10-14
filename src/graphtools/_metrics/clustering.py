@@ -1,7 +1,7 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
-from ..utils.validity import _graph_device
+from ..validity import _graph_device
 
 def local_clustering_coeff(graph: Data, device: torch.device | str | None = None) -> torch.Tensor:
     """
@@ -29,7 +29,7 @@ def local_clustering_coeff(graph: Data, device: torch.device | str | None = None
         return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device)
     
     # Adjacency matrix
-    adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), device = device)
+    adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), dtype = torch.float32, device = device)
     edge_index = graph.edge_index.to(device)
     adj_matrix[edge_index[0], edge_index[1]] = 1
 
@@ -65,7 +65,7 @@ def global_clustering_coeff(graph: Data, device: torch.device | str | None = Non
         return torch.tensor(torch.nan, dtype = torch.float32, device = device)
 
     # Adjacency matrix
-    adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), device = device)
+    adj_matrix = torch.zeros((graph.num_nodes, graph.num_nodes), dtype = torch.float32, device = device)
     edge_index = graph.edge_index.to(device)
     adj_matrix[edge_index[0], edge_index[1]] = 1
 
@@ -77,7 +77,7 @@ def global_clustering_coeff(graph: Data, device: torch.device | str | None = Non
 
     # Avoid division by zero
     if total_triplets == 0:
-        return torch.tensor(0.0, device=device)
+        return torch.tensor(0.0, dtype = torch.float32, device = device)
 
     global_clustering = closed_triplets / total_triplets
 

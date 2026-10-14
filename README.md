@@ -4,6 +4,7 @@ PyTorch and PyTorch Geometric based package for:
 - Graphon sampling (module ```graphon```)
 - Network analysis (module ```metrics```)
 - Graph construction (module ```builder```)
+- Optimal transport between graphs (module ```opt```)
 
 ## Dependency management
 
@@ -76,8 +77,85 @@ installation command is sufficient.
 ## Import package
 
 ```python
-from graphtools import graphon, metrics, builder
+from graphtools import graphon, metrics, builder, opt
 ```
+
+## Execution conventions
+
+The same package supports CPU and Torch CUDA execution. Choosing a device does
+not change the algorithm or automatically enable a different solver.
+
+| Operations | Execution and output |
+| --- | --- |
+| Torch sampling | CPU by default; `device` selects where to create data. |
+| Adjacency, Laplacian, random walk, clustering, spectral analysis | Follow `edge_index`, or an explicit `device`. Unused features and positions do not affect placement. |
+| Homophily and informativeness | Follow `edge_index` and `x`. These must share a device unless an explicit `device` permits local transfers. |
+| NetworkX centralities, inverse shortest path, Jaccard | CPU computation; output follows `edge_index` or an explicit `device`. Input graphs remain unchanged. |
+| FGW conditional gradient (POT) | CPU preparation and solver; loss and info tensors follow `graph_1.edge_index` or an explicit `device`. |
+| Voronoi builders | Geometry is computed on CPU. `build_graph` returns a new graph on the input positions' device; low-level builders use `device` for output placement. |
+| Plotting | Rendering uses CPU data; GPU tensors are read through local CPU copies. |
+
+For analysis functions, `device` selects the output device. Torch operations
+also compute there when supported. CPU-only algorithms use local CPU data and
+transfer the final result to the requested device, without moving the input graph:
+
+```python
+C_gpu = metrics.jaccard_similarity_matrix(graph, device="cuda")
+loss_gpu, info_gpu = opt.fused_gromov_wasserstein_distance(g1, g2, device="cuda")
+```
+
+With `device=None`, topology functions follow `edge_index` (CPU if absent).
+FGW follows the first graph's `edge_index`; the second graph is not moved.
+The internal computation device can differ from the output device.
+
+Feature-based metrics preserve floating input precision. FGW promotes the
+floating dtypes of the features (when used), histograms and supplied structural
+matrices to a common dtype. Integer-only analysis inputs and newly constructed
+topological matrices use float32; indices and labels retain integer types.
+Preserving a dtype does not imply that every backend supports every operation
+in that dtype. Sampling without an input floating dtype retains its documented
+defaults.
+
+Analysis functions do not mutate input graphs: they do not overwrite attributes,
+move graph storage, or attach caches. Local tensors may share storage with the
+inputs, so input-derived values must not be modified in-place. A clone is needed
+only when an operation actually writes to shared data. Creating and populating
+a new graph is permitted.
+
+Validation helpers are imported through `graphtools.validity`. Their
+implementations live in `_validity/execution.py`, including device resolution,
+floating dtype promotion, size checks and class probability validation. Checks
+inspect only the attributes needed by the operation. An explicit device is
+resolved immediately, so delegating wrappers do not repeat device-consistency
+checks. Graph snapshots and immutability checks belong in tests, not in normal
+execution. Preparation reuse and parallel FGW execution are subsequent steps.
+
+Run the execution-contract tests with:
+
+```bash
+python -m pytest tests -v
+```
+
+The test suite is organized by contract:
+
+| File | Checks |
+| --- | --- |
+| `tests/device_test.py` | Inferred and explicit output placement, CPU/CUDA transfers, mixed inputs and attributes that are not used by the operation. |
+| `tests/precision_test.py` | Floating dtypes, known numerical results, dense/sparse matrices, spectral residuals and FGW costs and marginal constraints. |
+| `tests/mutation_test.py` | Preservation of both graph values and tensor identities, metadata, integer inputs, optional histograms and structural matrices. |
+
+`tests/utils.py` provides small example graphs, snapshots and explicit function
+cases shared across the categories. Hard-label metrics receive one-hot features;
+continuous metrics receive non-collinear features. Full covariance comparison
+cases use `eps=1e-3` to control conditioning. The spectral tests use eigenpair
+residuals and cluster properties, since eigenvector signs and cluster IDs can
+differ without changing the result.
+
+The current scope is the computational functions exposed by `metrics.py` and
+FGW in `_opt/distance.py`. Plotting and the unimplemented non-parametric
+informativeness method are excluded. CUDA cases are skipped when no CUDA device
+is available; skipped cases do not constitute GPU validation. Each file can
+also be run separately, for example `python -m pytest tests/device_test.py -v`.
 
 ## Package update
 

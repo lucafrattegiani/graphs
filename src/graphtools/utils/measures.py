@@ -1,5 +1,6 @@
 #Torch data and computations
 import torch
+from ..validity import _floating_dtype
 
 #--------------------------------------------------
 #CENTRALIZATION
@@ -21,7 +22,7 @@ def gini_index(x: torch.Tensor) -> torch.Tensor:
     """
     n = x.numel() #Vector length
     if n == 0: #Nan values for empty tensors
-        return torch.tensor(torch.nan, device=x.device)
+        return torch.tensor(torch.nan, dtype = _floating_dtype(x), device = x.device)
     
     # Sort the measurements in ascending order
     sorted_x = torch.sort(x)[0]

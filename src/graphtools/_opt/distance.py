@@ -4,9 +4,11 @@ import ot
 from torch_geometric.data import Data
 
 from ..utils.matrices import adjacency_matrix, laplacian_matrix, inverse_shortest_path_matrix, jaccard_similarity_matrix
-from ..utils.validity import _graph_device
+from ..validity import _graph_device, _floating_dtype
 
-def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float = 0.5, structure: str = "adjacency") -> tuple[torch.Tensor, dict]:
+def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float = 0.5,
+                                     structure: str = "adjacency", *,
+                                     device: torch.device | str | None = None) -> tuple[torch.Tensor, dict]:
     """
     Computes the 2-Fused Gromov-Wasserstein distance between two graphs:
 
@@ -27,23 +29,35 @@ def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float
         only structure contributes.
     structure : str, default = "adjacency"
         Matrix used when ``graph.C`` is absent or None. One of {"adjacency", "laplacian", "shortest_path", "jaccard"}.
+    device : torch.device | str | None
+        Output device for the loss and all tensors in info. If None, follow
+        graph_1.edge_index (CPU if absent). Preparation and POT's solver run
+        on CPU using local transfers without changing either graph.
 
     Returns:
     -------
     tuple[torch.Tensor, dict]
         Scalar FGW objective and a dictionary containing the transport plan
         ``T``, the weighted feature term ``w_term`` and the weighted
-        structural term ``gw_term``.
+        structural term ``gw_term``. Results use the requested output device. Floating input dtypes
+        are promoted to a common dtype; integer-only inputs use float32.
     """
     graphs = [graph_1, graph_2]
-    device = _graph_device(graph_1)
+    output_device = _graph_device(graph_1, device)
+    device = torch.device("cpu")
+    inputs = []
+    for graph in graphs:
+        if alpha < 1:
+            inputs.append(graph.x)
+        inputs.extend((getattr(graph, "h", None), getattr(graph, "C", None)))
+    dtype = _floating_dtype(*inputs)
 
     # Extract node feature costs (squared Euclidean distance)
     if alpha < 1:
-        features = [graph.x.to(device = device, dtype = torch.float32) for graph in graphs]
+        features = [graph.x.to(device = device, dtype = dtype) for graph in graphs]
         M = torch.cdist(features[0], features[1], p = 2).square()
     else:
-        M = torch.zeros((graph_1.num_nodes, graph_2.num_nodes), device = device)
+        M = torch.zeros((graph_1.num_nodes, graph_2.num_nodes), dtype = dtype, device = device)
 
     # Extract graph histograms, using uniform node weights by default
     hists = []
@@ -66,9 +80,10 @@ def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float
         if matrix is None:
             kwargs = {"normalized": False} if structure in ("adjacency", "laplacian") else {}
             matrix = structure_functions[structure](graph, device = device, sparse = False, **kwargs)
+        matrix = matrix.to(M)
         if matrix.layout != torch.strided:
             matrix = matrix.to_dense()
-        C.append(matrix.to(M))
+        C.append(matrix)
 
     # Compute fused Gromov-Wasserstein distance
     distance, info = ot.gromov.fused_gromov_wasserstein2(
@@ -89,6 +104,6 @@ def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float
     # Select and rename relevant information
     to_keep = ["T", "lin_loss", "quad_loss"]
     new_names = ["T", "w_term", "gw_term"]
-    info = {new_name: info[key] for key, new_name in zip(to_keep, new_names)}
+    info = {new_name: info[key].to(output_device) for key, new_name in zip(to_keep, new_names)}
 
-    return distance, info
+    return distance.to(output_device), info

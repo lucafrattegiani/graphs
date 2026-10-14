@@ -1,7 +1,7 @@
 #Torch data and computations
 import torch
 from torch_geometric.data import Data
-from ..utils.validity import _graph_device
+from ..validity import _graph_device
 
 def density(graph: Data, device: torch.device | str | None = None) -> torch.Tensor:
     """

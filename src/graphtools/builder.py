@@ -14,6 +14,9 @@ def build_graph(positions: torch.Tensor, method: str = "voronoi",
                 method_kwargs: dict | None = None) -> Data:
     """Build a graph from two-dimensional spatial positions.
 
+    Voronoi geometry is computed on CPU. The returned graph uses the input
+    positions' device and shares their tensor; the builder does not modify it.
+
     Parameters
     ----------
     positions : torch.Tensor

@@ -1,3 +1,3 @@
-"""Graphon sampling and graph analysis utilities."""
+"""Graphon sampling, graph analysis, and optimal transport utilities."""
 
-__all__ = ["builder", "graphon", "metrics"]
+__all__ = ["builder", "graphon", "metrics", "opt", "validity"]

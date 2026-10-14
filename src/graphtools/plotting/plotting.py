@@ -575,7 +575,7 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     )
 
 
-def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] = (7, 7),
+def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, float] = (7, 7),
                  ax: Axes | None = None, show_marginals: bool = False) -> None:
     """
     Plots a matrix as a heatmap.
@@ -621,8 +621,6 @@ def plot_heatmap(matrix: torch.Tensor, title: str, figsize: tuple[float, float] 
 
     image = ax.imshow(matrix_values, interpolation = "nearest")
     ax.set_title(title)
-    ax.set_xlabel("Nodes")
-    ax.set_ylabel("Nodes")
 
     if show_marginals:
         # Keep the marginal bars aligned with the heatmap cells.

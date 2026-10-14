@@ -2,7 +2,7 @@
 import torch
 from torch_geometric.data import Data
 from ..utils.measures import gaussian_hellinger_distance, gaussian_kl_divergence
-from ..utils.validity import _graph_device
+from ..validity import _graph_device, _floating_dtype
 
 def jsd_informativeness(graph: Data, device: torch.device | str | None = None, aggregate: bool = True, attributes_type: str = "hard", level: str = "node") -> torch.Tensor:
     """
@@ -20,7 +20,9 @@ def jsd_informativeness(graph: Data, device: torch.device | str | None = None, a
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Computation and output device. If None, edge_index and x must
+        share a device. An explicit device permits local transfers; the
+        graph is not modified. Floating feature precision is preserved.
     aggregate : bool
         Whether to aggregate the Jensen-Shannon to get a graph-level measure.
     attribute_type : str
@@ -33,12 +35,12 @@ def jsd_informativeness(graph: Data, device: torch.device | str | None = None, a
     torch.Tensor
         Jensen-Shannon coefficients for neighborhood informativeness.
     """
-    device = _graph_device(graph, device)
+    device = _graph_device(graph, device, attributes = ("edge_index", "x"))
     if level == "class" and attributes_type == "soft":
         raise ValueError("Class-level informativity is only defined for hard node assignments")
     
     # Extract labels as K-dimensional vectors and send to device
-    labels = graph.x.float().to(device) 
+    labels = graph.x.to(device = device, dtype = _floating_dtype(graph.x))
     edges = graph.edge_index.to(device) 
     n = graph.num_nodes 
     
@@ -47,14 +49,14 @@ def jsd_informativeness(graph: Data, device: torch.device | str | None = None, a
     num_edges = edges.size(1)
     
     # Compute node degrees
-    degrees = torch.bincount(edges[0], minlength=n).to(dtype=torch.float32, device=device) 
+    degrees = torch.bincount(edges[0], minlength=n).to(labels.dtype)
 
     # Compute the marginal distribution q
     q = (labels * degrees.view(-1, 1)).sum(dim=0)
     q = q / num_edges
 
     # Initialize neighborhood counts for any node
-    p_i = torch.zeros((n, K), dtype=torch.float32, device=device) 
+    p_i = labels.new_zeros((n, K))
     # Count neighbors' one-hot encoded (or soft) labels for each node
     p_i.index_add_(0, edges[0], labels[edges[1]]) 
 
@@ -93,12 +95,12 @@ def jsd_informativeness(graph: Data, device: torch.device | str | None = None, a
         labels_1d = labels.argmax(dim=1)
         
         # Initialize class conditioned neighborhood distributions
-        p_k = torch.zeros((K, K), dtype=torch.float32, device=device) 
+        p_k = labels.new_zeros((K, K))
         # Count neighborhood distributions for each class
         p_k.index_add_(0, labels_1d, p_i) 
         
         # Count number of nodes for each class
-        n_k = torch.bincount(labels_1d, minlength=K).to(dtype=torch.float32, device=device) 
+        n_k = torch.bincount(labels_1d, minlength=K).to(labels.dtype)
         
         # Avoid division by 0
         n_k_safe = n_k.clamp(min=1.0) 
@@ -144,7 +146,9 @@ def non_parametric_neighbor_informativeness(graph: Data, device: torch.device | 
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Computation and output device. If None, edge_index and x must
+        share a device. An explicit device permits local transfers; the
+        graph is not modified. Floating feature precision is preserved.
     aggregate : bool
         Whether to aggregate the neighborhood informativeness to get a graph-level measure.
 
@@ -170,7 +174,9 @@ def parametric_neighbor_informativeness(graph: Data, device: torch.device | str 
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Computation and output device. If None, edge_index and x must
+        share a device. An explicit device permits local transfers; the
+        graph is not modified. Floating feature precision is preserved.
     aggregate : bool
         Whether to aggregate the neighborhood informativeness to get a graph-level measure.
     eps : float
@@ -185,8 +191,8 @@ def parametric_neighbor_informativeness(graph: Data, device: torch.device | str 
     torch.Tensor
         Parametric neighborhood informativeness of the graph.
     """
-    device = _graph_device(graph, device)
-    attributes = graph.x.to(device = device)
+    device = _graph_device(graph, device, attributes = ("edge_index", "x"))
+    attributes = graph.x.to(device = device, dtype = _floating_dtype(graph.x))
     source, target = graph.edge_index.to(device)
     degrees = torch.bincount(source, minlength = graph.num_nodes)
 
@@ -280,7 +286,9 @@ def continuous_neighbor_informativeness(graph: Data, device: torch.device | str 
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Computation and output device. If None, edge_index and x must
+        share a device. An explicit device permits local transfers; the
+        graph is not modified. Floating feature precision is preserved.
     method : str
         Method to compute the neighborhood informativeness {"NP", "P"}.
     aggregate : bool
@@ -314,7 +322,9 @@ def neighborhood_informativeness(graph: Data, device: torch.device | str | None 
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Computation and output device. If None, edge_index and x must
+        share a device. An explicit device permits local transfers; the
+        graph is not modified. Floating feature precision is preserved.
     aggregate : bool
         Whether to aggregate the informativeness to get a graph-level measure.
     attributes_type : str
@@ -329,10 +339,10 @@ def neighborhood_informativeness(graph: Data, device: torch.device | str | None 
     torch.Tensor
         Neighborhood informativeness of the graph.
     """
-    device = _graph_device(graph, device)
+    device = _graph_device(graph, device, attributes = ("edge_index", "x"))
     # Check if graph is valid
     if graph.num_nodes < 2 or graph.edge_index is None or graph.edge_index.size(1) == 0:
-        return torch.tensor(torch.nan, device=device)
+        return torch.tensor(torch.nan, dtype = _floating_dtype(graph.x), device = device)
     if not hasattr(graph, "x") or graph.x is None:
         raise ValueError("Graph must have node attributes to compute neighbor informativeness")
     if graph.x.dim() != 2:

@@ -17,6 +17,9 @@ from torch_geometric.utils import to_undirected
 def voronoi(positions: torch.Tensor, device: torch.device | str = "cpu") -> list[torch.Tensor | Voronoi | None]:
     """Create Voronoi edges and return the associated tessellation.
 
+    Tessellation is computed on CPU. The device selects output placement,
+    not a GPU geometry backend. Input positions are not modified.
+
     Parameters
     ----------
     positions : torch.Tensor
@@ -69,6 +72,9 @@ def epsilon_voronoi(positions: torch.Tensor, device: torch.device | str = "cpu",
                     tolerance: float = 1e-9,
                     resolution: int = 32) -> list[torch.Tensor | list[Polygon] | None]:
     """Create epsilon-Voronoi edges and return the associated tessellation.
+
+    Tessellation is computed on CPU. The device selects output placement,
+    not a GPU geometry backend. Input positions are not modified.
 
     Parameters
     ----------

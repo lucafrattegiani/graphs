@@ -8,7 +8,7 @@ from torch_geometric.utils import to_networkx
 
 #Utilities
 from ..utils.measures import gini_index
-from ..utils.validity import _graph_device
+from ..validity import _graph_device
 
 def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.device | str | None = None, centralization: str = "none") -> torch.Tensor:
     """
@@ -28,7 +28,8 @@ def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.d
     normalized : bool
         Whether to normalize the betweenness centrality.
     device : torch.device | str
-        Device to perform computations on.
+        Output device. If None, follow edge_index (CPU if absent).
+        NetworkX and reductions run on CPU without modifying the graph.
     centralization : str
         Type of centralization to compute {"none", "freeman", "gini"}.
 
@@ -37,15 +38,16 @@ def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.d
     torch.Tensor
         Betweenness centrality of the graph.
     """
-    device = _graph_device(graph, device)
+    output_device = _graph_device(graph, device)
+    device = torch.device("cpu")
     if centralization not in ["none", "freeman", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'freeman', 'gini'}")
 
     if graph.num_nodes < 3: #Nan values for graphs with less than 3 nodes
         if centralization == "freeman" or centralization == "gini":
-            return torch.tensor(torch.nan, dtype = torch.float32, device = device)
+            return torch.tensor(torch.nan, dtype = torch.float32, device = device).to(output_device)
         else:
-            return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device)
+            return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device).to(output_device)
 
     # Compute betweenness centrality for each node
     graph_nx = to_networkx(graph, node_attrs = None, edge_attrs = None, to_undirected = True, remove_self_loops = True) #Convert to networkx graph for shortest path computation
@@ -63,7 +65,7 @@ def betweenness_centrality(graph: Data, normalized: bool = True, device: torch.d
             max_betweeness = betweeness.max()
             betweeness = 2 * (max_betweeness - betweeness).sum() / ((graph.num_nodes - 1)**2 * (graph.num_nodes - 2))
 
-    return betweeness
+    return betweeness.to(output_device)
 
 def harmonic_centrality(graph: Data, device: torch.device | str | None = None, normalized: bool = True, centralization: str = "none") -> torch.Tensor:
     """
@@ -80,7 +82,8 @@ def harmonic_centrality(graph: Data, device: torch.device | str | None = None, n
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Output device. If None, follow edge_index (CPU if absent).
+        NetworkX and reductions run on CPU without modifying the graph.
     normalized : bool
         Whether to normalize the harmonic centrality.
     centralization : str
@@ -91,17 +94,18 @@ def harmonic_centrality(graph: Data, device: torch.device | str | None = None, n
     torch.Tensor
         Harmonic centrality of the graph.
     """
-    device = _graph_device(graph, device)
+    output_device = _graph_device(graph, device)
+    device = torch.device("cpu")
     if centralization not in ["none", "freeman", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'freeman', 'gini'}")
 
     if graph.num_nodes < 3: #Nan values for graphs with less than 3 nodes
         if centralization == "freeman":
-            return torch.tensor(torch.nan, dtype = torch.float32, device = device)
+            return torch.tensor(torch.nan, dtype = torch.float32, device = device).to(output_device)
         elif centralization == "gini":
-            return torch.tensor(torch.nan, dtype = torch.float32, device = device)
+            return torch.tensor(torch.nan, dtype = torch.float32, device = device).to(output_device)
         else:
-            return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device)
+            return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device).to(output_device)
 
     # Compute harmonic centrality for each node
     graph_nx = to_networkx(graph, node_attrs = None, edge_attrs = None, to_undirected = True, remove_self_loops = True) #Convert to networkx graph for shortest path computation
@@ -122,7 +126,7 @@ def harmonic_centrality(graph: Data, device: torch.device | str | None = None, n
         elif centralization == "gini": #Compute graph-level Gini centralization
             harmonic_centrality = gini_index(harmonic_centrality)
 
-    return harmonic_centrality
+    return harmonic_centrality.to(output_device)
 
 def pagerank_centrality(graph: Data, device: torch.device | str | None = None, alpha: float = 0.85, directed: bool = False, centralization: str = "none") -> torch.Tensor:
     """
@@ -139,7 +143,8 @@ def pagerank_centrality(graph: Data, device: torch.device | str | None = None, a
     graph : torch_geometric.data.Data
         Graph data.
     device : torch.device | str
-        Device to perform computations on.
+        Output device. If None, follow edge_index (CPU if absent).
+        NetworkX and reductions run on CPU without modifying the graph.
     alpha : float
         Damping factor.
     directed : bool
@@ -152,12 +157,13 @@ def pagerank_centrality(graph: Data, device: torch.device | str | None = None, a
     torch.Tensor
         PageRank centrality of the graph.
     """
-    device = _graph_device(graph, device)
+    output_device = _graph_device(graph, device)
+    device = torch.device("cpu")
     if centralization not in ["none", "entropy", "gini"]:
         raise ValueError("Centralization must be one of {'none', 'entropy', 'gini'}")
 
     if graph.num_nodes < 2:
-        return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device)
+        return torch.full((graph.num_nodes,), torch.nan, dtype = torch.float32, device = device).to(output_device)
 
     # Compute PageRank centrality for each node
     graph_nx = to_networkx(graph, node_attrs = None, edge_attrs = None, to_undirected = not directed, remove_self_loops = True) #Convert to networkx graph for shortest path computation
@@ -172,7 +178,7 @@ def pagerank_centrality(graph: Data, device: torch.device | str | None = None, a
         # Compute graph-level Gini centralization
         pagerank_centrality = gini_index(pagerank_centrality)
 
-    return pagerank_centrality
+    return pagerank_centrality.to(output_device)
 
 def centrality(graph: Data, method: str, device: torch.device | str | None = None,
                centralization: str = "none", **kwargs) -> torch.Tensor:
@@ -186,7 +192,8 @@ def centrality(graph: Data, method: str, device: torch.device | str | None = Non
     method : str
         Centrality method to use: {"betweenness", "harmonic", "pagerank"}.
     device : torch.device | str
-        Device to perform computations on.
+        Output device. If None, follow edge_index (CPU if absent).
+        NetworkX and reductions run on CPU without modifying the graph.
     centralization : str
         Type of graph-level centralization. The accepted values depend on the
         selected method.

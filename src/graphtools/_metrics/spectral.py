@@ -4,7 +4,7 @@ from torch_geometric.data import Data
 from torch_kmeans import KMeans
 
 from ..utils.matrices import adjacency_matrix, laplacian_matrix, random_walk_matrix
-from ..utils.validity import _graph_device
+from ..validity import _graph_device
 
 def spectral_decomposition(graph: Data, matrix: str = "adjacency", normalized: bool = True,
                            device: torch.device | str | None = None,

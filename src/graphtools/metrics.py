@@ -29,13 +29,8 @@ from ._metrics.homophily import hard_edge_homophily, soft_edge_homophily, contin
 from ._metrics.spectral import spectral_decomposition, spectral_embedding, spectral_clustering
 
 #--------------------------------------------------
-#GRAPH DISTANCES
-#--------------------------------------------------
-from ._metrics.distance import fused_gromov_wasserstein_distance
-
-#--------------------------------------------------
 #UTILITIES
 #--------------------------------------------------
 from .utils.measures import gini_index
 from .utils.matrices import adjacency_matrix, laplacian_matrix, random_walk_matrix, inverse_shortest_path_matrix, jaccard_similarity_matrix
-from .plotting import plot_heatmap, plot_elbow, plot_node_alignment, plot_coupling
+from .plotting import plot_heatmap, plot_elbow, plot_node_alignment

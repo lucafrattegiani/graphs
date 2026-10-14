@@ -25,6 +25,9 @@ notebook = [
     "ipykernel",
     "ipywidgets",
 ]
+test = [
+    "pytest",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
