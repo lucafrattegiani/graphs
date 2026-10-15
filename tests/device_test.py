@@ -1,10 +1,14 @@
-"""Device contracts: inferred placement, explicit transfers and CPU adapters."""
-
+# Testing library
 import pytest
+
+# Testing library
 import torch
 from torch_geometric.data import Data
 
+# Tested modules
 from graphtools import metrics, opt
+
+# Testing utilities
 from .utils import (
     CUDA, DEVICES, DEVICE_PAIRS, METRIC_CASES, FEATURE_CASES, TOPOLOGY_CASES,
     example_graph, output_tensors,

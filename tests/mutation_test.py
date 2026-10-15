@@ -1,17 +1,21 @@
-"""Input preservation, independently of output values and placement contracts."""
-
+# Testing library
 import pytest
-import torch
 
-from graphtools import metrics, opt
+# Testing utilities
 from .utils import (
     DEVICES, METRIC_CASES, example_graph, snapshot, assert_graph_unchanged,
 )
 
+# Data representation and computation
+import torch
+
+# Tested modules
+from graphtools import metrics, opt
+
 
 @pytest.mark.parametrize("function, kwargs, features", METRIC_CASES)
 @pytest.mark.parametrize("input_device", DEVICES)
-def test_metric_preserves_graph(function, kwargs, features, input_device):
+def test_metric_mutation(function, kwargs, features, input_device):
     """Analysis preserves input tensors and metadata, including during local transfers."""
     graph = example_graph(features=features, device=input_device)
     graph.description = {"source": "test", "labels": [1, 2]}
@@ -22,7 +26,7 @@ def test_metric_preserves_graph(function, kwargs, features, input_device):
 
 @pytest.mark.parametrize("provided_matrix", [None, "dense", "sparse"])
 @pytest.mark.parametrize("input_device", DEVICES)
-def test_fgw_preserves_both_graphs(provided_matrix, input_device):
+def test_fgw_mutation(provided_matrix, input_device):
     """FGW preserves both graphs, optional histograms and supplied structural matrices."""
     first = example_graph(torch.float64, device=input_device)
     second = example_graph()
@@ -37,7 +41,7 @@ def test_fgw_preserves_both_graphs(provided_matrix, input_device):
 
 
 @pytest.mark.parametrize("dtype", [torch.int64, torch.float64])
-def test_gini_preserves_input(dtype):
+def test_gini_mutation(dtype):
     """Gini calculation leaves the original unsorted tensor unchanged."""
     values = torch.tensor([3, 1, 2], dtype=dtype)
     original, version = values.clone(), values._version
@@ -46,7 +50,7 @@ def test_gini_preserves_input(dtype):
     torch.testing.assert_close(values, original, rtol=0, atol=0)
 
 
-def test_feature_gradients_are_preserved():
+def test_dirichlet_mutation():
     """Dirichlet backward computes gradients without changing feature values."""
     graph = example_graph(torch.float64, features="continuous")
     graph.x.requires_grad_()

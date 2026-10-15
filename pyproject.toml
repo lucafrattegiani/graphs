@@ -34,3 +34,8 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    'ignore:^`torch\.jit\.script` is deprecated\. Please switch to `torch\.compile` or `torch\.export`\.$:FutureWarning:^torch\.jit\._script$',
+]

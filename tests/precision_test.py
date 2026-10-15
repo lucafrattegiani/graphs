@@ -1,10 +1,14 @@
-"""Numerical contracts: dtype, known values, tolerances and solver invariants."""
-
+# Testing library
 import pytest
+
+# Data representation and computation
 import torch
 from torch_geometric.data import Data
 
+# Tested modules
 from graphtools import metrics, opt
+
+# Testing utilities
 from .utils import CUDA, DEVICES, FEATURE_CASES, example_graph, output_tensors
 
 
