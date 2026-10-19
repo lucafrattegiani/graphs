@@ -1,10 +1,10 @@
 # Graphtools
 
 PyTorch and PyTorch Geometric based package for:
-- Graphon sampling ([graph sampling example][notebooks/graph_sampling.ipynb])
-- Network analysis ([graph metrics example][notebooks/graph_metrics.ipynb])
-- Graph construction ([graph building example][notebooks/graph_building.ipynb])
-- Optimal transport between graphs ([graph ot example][notebooks/graph_ot.ipynb])
+- Graphon sampling ([graph sampling example](notebooks/graph_sampling.ipynb))
+- Network analysis ([graph metrics example](notebooks/graph_metrics.ipynb))
+- Graph construction ([graph building example](notebooks/graph_building.ipynb))
+- Optimal transport between graphs ([graph ot example](notebooks/graph_ot.ipynb))
 
 ## Dependency management
 
