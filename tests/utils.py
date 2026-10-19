@@ -138,3 +138,18 @@ def coupling_batches(dtype=torch.float32, device="cpu"):
         )
     return ([graph(2, v) for v in (0., 2., 5.)],
             [graph(3, v) for v in (5., 0., 2.)])
+
+
+def variable_coupling_batches(device="cpu"):
+    """Interleaved graph/support sizes with zero masses on real nodes."""
+    def graph(n, masses, offset):
+        values = torch.arange(n, dtype=torch.float64, device=device) / n
+        return Data(num_nodes=n,
+                    edge_index=torch.empty((2, 0), dtype=torch.long, device=device),
+                    C=(values[:, None] - values[None, :]).square(),
+                    x=(values + offset)[:, None],
+                    h=torch.tensor(masses, dtype=torch.float64, device=device))
+    return ([graph(4, [.25, 0., .75, 0.], 0.),
+             graph(2, [.6, .4], .3), graph(3, [0., 1., 0.], .7)],
+            [graph(3, [.5, 0., .5], .5),
+             graph(4, [0., 0., 1., 0.], .1), graph(2, [.2, .8], .9)])

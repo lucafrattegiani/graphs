@@ -83,11 +83,25 @@ def test_gini_follows_tensor_device(device):
 @pytest.mark.parametrize("input_device, output_device", DEVICE_PAIRS)
 def test_hungarian_coupling_output_device(input_device, output_device):
     """Coupling, costs and assignment honor inferred and explicit devices."""
-    from .utils import coupling_batches
-    first, second = coupling_batches(device=input_device)
+    from .utils import variable_coupling_batches
+    first, second = variable_coupling_batches(device=input_device)
     result = opt.hungarian_coupling(first, second, device=output_device, reg=1.)
     expected = torch.device(input_device if output_device is None else output_device)
     if expected.type == "cuda":
         expected = torch.device("cuda", torch.cuda.current_device())
     assert all(tensor.device == expected for tensor in output_tensors(result))
-    torch.testing.assert_close(result[1]["cost"], result[0].new_zeros(()), atol=1e-5, rtol=0)
+    assert torch.isfinite(result[1]["C"]).all()
+
+
+@pytest.mark.parametrize("input_device, output_device", DEVICE_PAIRS)
+def test_prepare_graphs_device(input_device, output_device):
+    """Filtered tensors and original node indices follow the selected device."""
+    from graphtools.utils.preprocessing import prepare_graphs
+    graph = example_graph(device=input_device)
+    graph.C = torch.eye(4, device=input_device)
+    graph.h = torch.tensor([0., .25, .75, 0.], device=input_device)
+    result = prepare_graphs(graph, device=output_device, dtype=torch.float64)
+    expected = torch.device(input_device if output_device is None else output_device).type
+    assert all(value.device.type == expected for value in result.values() if isinstance(value, torch.Tensor))
+    assert result["h"].dtype == torch.float64
+    assert result["active_nodes"].dtype == torch.long

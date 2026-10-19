@@ -469,3 +469,109 @@ def test_hungarian_coupling_node_masses(alpha, expected):
     torch.testing.assert_close(info["C"], info["C"].new_tensor([[expected]]))
     torch.testing.assert_close(W, W.new_ones((1, 1)))
     assert W.dtype == (torch.float32 if alpha == 0 else torch.float64)
+
+
+@pytest.mark.parametrize("sparse", [False, True])
+def test_prepare_graphs_support_and_plan_indices(sparse):
+    """Filtering preserves original costs and lets a node plan regain its indices."""
+    from graphtools.utils.preprocessing import prepare_graphs
+    # The zero-mass middle node still contributes to the original path distance.
+    C = torch.tensor([[0., 1., 2.], [1., 0., 1.], [2., 1., 0.]])
+    graph = Data(num_nodes=3, C=C.to_sparse() if sparse else C,
+                 x=torch.tensor([[10.], [20.], [30.]]),
+                 h=torch.tensor([0.25, 0., 0.75]))
+    prepared = prepare_graphs(graph)
+    assert prepared["active_nodes"].tolist() == [0, 2]
+    assert prepared["removed_nodes"].tolist() == [1]
+    torch.testing.assert_close(prepared["C"], torch.tensor([[0., 2.], [2., 0.]]))
+    torch.testing.assert_close(prepared["x"], torch.tensor([[10.], [30.]]))
+    reduced = torch.diag(prepared["h"])
+    restored = reduced.new_zeros((prepared["num_nodes"], prepared["num_nodes"]))
+    active = prepared["active_nodes"]
+    restored[active[:, None], active[None, :]] = reduced
+    torch.testing.assert_close(restored, torch.diag(graph.h))
+
+
+@pytest.mark.parametrize("alpha", [0., 1.])
+def test_prepare_graphs_endpoint_attributes(alpha):
+    """Alpha zero ignores h/C; alpha one ignores x and preserves tiny positive masses."""
+    from graphtools.utils.preprocessing import prepare_graphs
+    graph = Data(num_nodes=3)
+    if alpha == 0:
+        graph.x = torch.ones(3, 1)
+        graph.C = torch.tensor([float("nan")], dtype=torch.float64)
+        graph.h = torch.zeros(3, dtype=torch.float64)
+    else:
+        graph.C = torch.eye(3, dtype=torch.float64)
+        graph.h = torch.tensor([1e-12, 0., 1. - 1e-12], dtype=torch.float64)
+        graph.x = torch.tensor([float("nan")])
+    result = prepare_graphs(graph, alpha)
+    if alpha == 0:
+        assert result["removed_nodes"].numel() == 0
+        torch.testing.assert_close(result["h"], torch.full((3,), 1 / 3))
+        assert result["C"].dtype == torch.float32
+    else:
+        assert result["active_nodes"].tolist() == [0, 2]
+        torch.testing.assert_close(result["h"], graph.h[[0, 2]], rtol=0, atol=0)
+        assert result["x"] is None
+
+
+@pytest.mark.parametrize("h", [[0., 0.], [-0.1, 1.1], [0.2, 0.2], [float("nan"), 1.]])
+def test_prepare_graphs_invalid_masses(h):
+    """An invalid histogram is rejected rather than silently normalized or filtered."""
+    from graphtools.utils.preprocessing import prepare_graphs
+    graph = Data(num_nodes=2, C=torch.eye(2), h=torch.tensor(h))
+    with pytest.raises(ValueError, match="masses"):
+        prepare_graphs(graph, alpha=1)
+
+
+@pytest.mark.parametrize("alpha", [0., .5, 1.])
+@pytest.mark.parametrize("pair_batch_size", [1, 3])
+def test_hungarian_variable_sizes_match_independent_pairs(alpha, pair_batch_size):
+    """Grouped costs match direct unpadded solves and yield a global optimum."""
+    import itertools
+    import ot
+    from .utils import variable_coupling_batches
+    first, second = variable_coupling_batches()
+    settings = dict(reg=1., max_iter=12, tol=0., max_iter_inner=100, tol_inner=1e-9)
+    W, info = opt.hungarian_coupling(first, second, alpha=alpha,
+                                   pair_batch_size=pair_batch_size, **settings)
+    expected = torch.empty(3, 3, dtype=torch.float64)
+    # Independent extraction from original graphs checks filtering and the
+    # scattering of all costs back to their original row/column positions.
+    for i, g1 in enumerate(first):
+        for j, g2 in enumerate(second):
+            h1 = torch.full_like(g1.h, 1 / g1.num_nodes) if alpha == 0 else g1.h
+            h2 = torch.full_like(g2.h, 1 / g2.num_nodes) if alpha == 0 else g2.h
+            active1, active2 = h1 > 0, h2 > 0
+            C1, C2 = g1.C[active1][:, active1], g2.C[active2][:, active2]
+            if alpha == 0:
+                C1, C2 = torch.zeros_like(C1), torch.zeros_like(C2)
+            M = (torch.cdist(g1.x[active1], g2.x[active2]).square() if alpha < 1
+                 else C1.new_zeros((C1.shape[0], C2.shape[0])))
+            result = ot.batch.solve_gromov_batch(
+                C1[None], C2[None], a=h1[active1][None], b=h2[active2][None],
+                M=M[None], alpha=alpha, symmetric=True, grad="detach", **settings)
+            expected[i, j] = result.value[0]
+    torch.testing.assert_close(info["C"], expected, rtol=1e-6, atol=1e-8)
+    minimum = min(sum(expected[i, p[i]] for i in range(3)) / 3
+                  for p in itertools.permutations(range(3)))
+    torch.testing.assert_close(info["cost"], minimum)
+    torch.testing.assert_close(W.sum(0), W.new_full((3,), 1 / 3))
+    torch.testing.assert_close(W.sum(1), W.new_full((3,), 1 / 3))
+
+
+def test_prepare_batches_groups_by_support():
+    """Grouping follows retained nodes, while preserving graph and node indices."""
+    from graphtools.utils.preprocessing import prepare_batches
+    from .utils import variable_coupling_batches
+    first, _ = variable_coupling_batches()
+    groups = prepare_batches(first, .5, device="cpu", dtype=torch.float64)
+    assert set(groups) == {1, 2}
+    assert groups[2]["indices"].tolist() == [0, 1]
+    assert groups[1]["indices"].tolist() == [2]
+    assert groups[2]["active_nodes"][0].tolist() == [0, 2]
+    assert groups[2]["removed_nodes"][0].tolist() == [1, 3]
+    assert groups[2]["num_nodes"] == [4, 2]
+    assert groups[2]["C"].shape == (2, 2, 2)
+    assert (groups[2]["h"] > 0).all()

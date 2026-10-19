@@ -37,8 +37,9 @@ def hungarian_coupling(
     ----------
     batch_1, batch_2 : Sequence[torch_geometric.data.Data]
         Nonempty lists or tuples containing the same number K of graphs.
-        Node counts must be positive and constant within each batch, but may
-        differ between the two batches. For alpha > 0, provide a finite,
+        Node counts must be positive but may vary within and between batches.
+        Zero-mass nodes are filtered locally, then graphs are grouped by
+        support size for computation without padding. For alpha > 0, provide a finite,
         symmetric structural matrix ``C`` of shape (n, n), dense or sparse.
         For alpha < 1, ``x`` of shape (n, d) is required, with the same feature
         dimension d for all graphs. Optional ``h`` of shape (n,) contains
@@ -93,7 +94,8 @@ def hungarian_coupling(
     FGW costs are numerical approximations and may differ from the package's
     CPU conditional-gradient solver. Linear assignment is optimal for the
     computed cost matrix; global optimality of each FGW solve is not guaranteed.
-    Zero node masses can cause numerical issues in POT's logarithmic projections.
+    Original graph indices are preserved across groups. Only zero-mass nodes
+    are excluded from the solver; structural costs are not recomputed.
     Gradients are disabled and node-level transport plans are not retained.
     """
     # 1. Check the batch contract and select one device/dtype for all pairs.
@@ -117,29 +119,40 @@ def hungarian_coupling(
     dtype = torch.promote_types(dtype, torch.float32)
     K = len(batch_1) # batch size
 
-    C1, h1, x1 = prepare_batches(batch_1, alpha, device=device, dtype=dtype)
-    C2, h2, x2 = prepare_batches(batch_2, alpha, device=device, dtype=dtype)
-    if alpha < 1 and x1.shape[2] != x2.shape[2]:
-        raise ValueError("The two batches must have the same feature width.")
+    groups_1 = prepare_batches(batch_1, alpha, device=device, dtype=dtype)
+    groups_2 = prepare_batches(batch_2, alpha, device=device, dtype=dtype)
+    if alpha < 1:
+        x1 = next(iter(groups_1.values()))["x"]
+        x2 = next(iter(groups_2.values()))["x"]
+        if x1.shape[2] != x2.shape[2]:
+            raise ValueError("The two batches must have the same feature width.")
 
-    # Compute FGW cost matrix between graph pairs from different batches
-    costs = C1.new_empty(K * K) # The cost matrix is initialized as a 1D vector
-    for start in range(0, K * K, pair_batch_size): # Loop over all the K^2 pairs with a step size of pair_batch_size
-        stop = min(start + pair_batch_size, K * K) # Maximum index of the pair evaluated in the current iteration
-        pairs = torch.arange(start, stop, device=device) # The evaluated pairs have indexes [start, start+1, ..., stop-1]
-        i, j = pairs // K, pairs % K #Convert the indexes of the 1D flatten vector into the 2D index notation of the cost matrix to extract correct graphs from the batches iterable objects
-        M = (torch.cdist(x1[i], x2[j]).square() if alpha < 1
-             else C1.new_zeros((stop - start, C1.shape[1], C2.shape[1]))) # Compute cross-graph node feature costs
-        result = ot.batch.solve_gromov_batch(
-            Ca=C1[i], Cb=C2[j], a=h1[i], b=h2[j], M=M,
-            alpha=alpha, loss="sqeuclidean", symmetric=True, reg=reg,
-            max_iter=max_iter, tol=tol,
-            max_iter_inner=max_iter_inner, tol_inner=tol_inner, grad="detach",
-        ) # Compute FGW between pairs in the batch
-        costs[start:stop] = result.value # Annotate value in the 1D tensor
+    # Compute every cross-batch cost, grouping only the numerical FGW solves.
+    # Each pair of groups has fixed node counts, even for heterogeneous inputs.
+    C = torch.empty((K, K), device=device, dtype=dtype)
+    for group_1 in groups_1.values():
+        for group_2 in groups_2.values():
+            C1, h1, x1 = group_1["C"], group_1["h"], group_1["x"]
+            C2, h2, x2 = group_2["C"], group_2["h"], group_2["x"]
+            count_1, count_2 = C1.shape[0], C2.shape[0]
+            # Flatten the rectangular group-pair block, then solve in chunks
+            # to limit memory. There is no local matching within these blocks.
+            for start in range(0, count_1 * count_2, pair_batch_size):
+                stop = min(start + pair_batch_size, count_1 * count_2)
+                pairs = torch.arange(start, stop, device=device)
+                i, j = pairs // count_2, pairs % count_2
+                M = (torch.cdist(x1[i], x2[j]).square() if alpha < 1
+                     else C1.new_zeros((stop - start, C1.shape[1], C2.shape[1])))
+                result = ot.batch.solve_gromov_batch(
+                    Ca=C1[i], Cb=C2[j], a=h1[i], b=h2[j], M=M,
+                    alpha=alpha, loss="sqeuclidean", symmetric=True, reg=reg,
+                    max_iter=max_iter, tol=tol,
+                    max_iter_inner=max_iter_inner, tol_inner=tol_inner, grad="detach",
+                )
+                # Restore original batch positions, rather than group order.
+                C[group_1["indices"][i], group_2["indices"][j]] = result.value
 
-    # Find the optimal coupling between graphs
-    C = costs.reshape(K, K) # Move from 1D vector to 2D cost matrix
+    # Find one global optimal coupling after filling all K*K costs.
     if not torch.isfinite(C).all():
         raise RuntimeError("FGW produced nonfinite results; check inputs and solver settings.")
     rows, columns = linear_sum_assignment(C.cpu().numpy()) # Solve the optimization problem using the 1:1 assignment solution

@@ -75,8 +75,8 @@ def test_dirichlet_mutation():
 @pytest.mark.parametrize("alpha", [0., 0.5, 1.])
 def test_hungarian_coupling_preserves_inputs(input_device, alpha):
     """Preparation and CPU assignment preserve graph attributes and tensor storage."""
-    from .utils import coupling_batches
-    first, second = coupling_batches(device=input_device)
+    from .utils import variable_coupling_batches
+    first, second = variable_coupling_batches(device=input_device)
     graphs = first + second
     for graph in graphs:
         graph.x.requires_grad_(True)
@@ -84,3 +84,16 @@ def test_hungarian_coupling_preserves_inputs(input_device, alpha):
     opt.hungarian_coupling(first, second, alpha=alpha, device="cpu", reg=1.)
     for graph, saved in zip(graphs, before):
         assert_graph_unchanged(graph, saved)
+
+
+def test_prepare_graphs_preserves_original_graph():
+    """Support filtering leaves original attributes, numbering and gradient flags intact."""
+    from graphtools.utils.preprocessing import prepare_graphs
+    graph = example_graph()
+    graph.C = torch.eye(4)
+    graph.h = torch.tensor([0., .25, .75, 0.])
+    graph.x.requires_grad_(True)
+    before = snapshot(graph)
+    result = prepare_graphs(graph, dtype=torch.float64)
+    assert result["removed_nodes"].tolist() == [0, 3]
+    assert_graph_unchanged(graph, before)
