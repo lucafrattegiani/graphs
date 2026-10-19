@@ -78,3 +78,16 @@ def test_gini_follows_tensor_device(device):
     """The tensor-only Gini utility follows its input without a device argument."""
     result = metrics.gini_index(torch.tensor([1., 2., 3.], device=device))
     assert result.device.type == device
+
+
+@pytest.mark.parametrize("input_device, output_device", DEVICE_PAIRS)
+def test_hungarian_coupling_output_device(input_device, output_device):
+    """Coupling, costs and assignment honor inferred and explicit devices."""
+    from .utils import coupling_batches
+    first, second = coupling_batches(device=input_device)
+    result = opt.hungarian_coupling(first, second, device=output_device, reg=1.)
+    expected = torch.device(input_device if output_device is None else output_device)
+    if expected.type == "cuda":
+        expected = torch.device("cuda", torch.cuda.current_device())
+    assert all(tensor.device == expected for tensor in output_tensors(result))
+    torch.testing.assert_close(result[1]["cost"], result[0].new_zeros(()), atol=1e-5, rtol=0)

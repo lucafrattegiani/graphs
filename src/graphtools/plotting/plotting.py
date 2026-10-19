@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from math import ceil, sqrt
+
 #Torch data and computations
 import numpy as np
 import torch
@@ -576,7 +579,8 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
 
 
 def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, float] = (7, 7),
-                 ax: Axes | None = None, show_marginals: bool = False) -> None:
+                 ax: Axes | None = None, show_marginals: bool = False,
+                 legend: bool = False) -> None:
     """
     Plots a matrix as a heatmap.
 
@@ -596,6 +600,9 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
         Plot column sums as vertical bars above the heatmap and row sums as
         horizontal bars to its left. Each bar is aligned with its matrix
         column or row and shows the actual sum, without normalization.
+
+    legend : bool, default = False
+        Display the colorbar mapping colors to matrix values.
 
     Returns:
     -------
@@ -627,7 +634,6 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
         divider = make_axes_locatable(ax)
         ax_top = divider.append_axes("top", size = "25%", pad = 0.15, sharex = ax)
         ax_left = divider.append_axes("left", size = "25%", pad = 0.65, sharey = ax)
-        ax_colorbar = divider.append_axes("right", size = "5%", pad = 0.15)
 
         num_rows, num_columns = matrix_values.shape
         ax_top.bar(np.arange(num_columns), matrix_values.sum(axis = 0),
@@ -643,16 +649,19 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
         for marginal_ax in (ax_top, ax_left):
             marginal_ax.set_axis_off()
 
-        fig.colorbar(image, cax = ax_colorbar)
-    else:
-        fig.colorbar(image, ax = ax, fraction = 0.046, pad = 0.04)
+    if legend:
+        if show_marginals:
+            ax_colorbar = divider.append_axes("right", size = "5%", pad = 0.15)
+            fig.colorbar(image, cax = ax_colorbar)
+        else:
+            fig.colorbar(image, ax = ax, fraction = 0.046, pad = 0.04)
 
     if standalone:
         fig.tight_layout()
         plt.show()
 
 
-def plot_coupling(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
+def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
                   title: str = "Coupling", figsize: tuple[float, float] = (15, 7),
                   node_size: float | None = None, linewidth: float = 2.0,
                   show_marginals: bool = False) -> None:
@@ -708,6 +717,120 @@ def plot_coupling(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
 
     fig.suptitle(title)
     fig.tight_layout(rect = (0, 0, 1, 0.95))
+    plt.show()
+
+
+def plot_coupling_hungarian(
+    batch_1: Sequence[Data], batch_2: Sequence[Data],
+    assignments: torch.Tensor | Sequence[int], *,
+    max_pairs: int | None = None,
+    show_adjacency: bool = False,
+    figsize: tuple[float, float] | None = None,
+    title: str = "Hungarian graph matching",
+    node_size: float | None = None,
+) -> None:
+    """Plot matched graph pairs in a grid, using a previously computed assignment.
+
+    Parameters:
+    ----------
+    batch_1, batch_2 : Sequence[torch_geometric.data.Data]
+        Nonempty batches of equal length K. Node coordinates are read from
+        pos and edges from edge_index. Graph sizes may differ. Node labels
+        are displayed as in plot_nodes. Input graphs are not modified.
+    assignments : torch.Tensor | Sequence[int]
+        Integer permutation of 0, ..., K-1, such as info["assignment"] from
+        hungarian_coupling. assignments[i] identifies the graph in batch_2
+        matched to batch_1[i]. Matching is never computed inside this plot.
+        GPU tensors are accepted and copied locally to CPU for indexing.
+    max_pairs : int | None, default = None
+        Display only the first max_pairs source graphs, in original batch
+        order. None displays all pairs. Titles retain zero-based batch indices.
+    show_adjacency : bool, default = False
+        Draw each graph's adjacency matrix below its spatial plot. Matrices
+        are computed on CPU from edge_index, not taken from graph.C.
+        Colorbars are omitted, following plot_heatmap's default.
+    figsize : tuple[float, float] | None, default = None
+        Overall figure size in inches. If None, scale the figure to the grid.
+        For n displayed pairs, columns = ceil(sqrt(n)) and
+        rows = ceil(n / columns). Unused grid cells are hidden.
+    title : str, default = "Hungarian graph matching"
+        Overall figure title; each grid cell also identifies its matched pair.
+    node_size : float | None, default = None
+        Node marker area passed to plot_nodes; None uses its automatic size.
+
+    Returns:
+    -------
+    None
+        Displays a figure with two graphs per grid cell. Missing positions
+        are handled by plot_nodes with a "No positions detected" placeholder.
+        Font sizes scale with displayed pairs: 1x for 1-4, 1.4x for 5-9,
+        1.8x for 10-16, and 2.2x above 16. Titles, ticks and legends are
+        adjusted locally, without changing Matplotlib's global settings.
+    """
+    # Validate the supplied assignment before creating the figure.
+    K = len(batch_1)
+    if K == 0 or len(batch_2) != K:
+        raise ValueError("Batches must be nonempty and have the same length.")
+    if max_pairs is not None:
+        if not isinstance(max_pairs, int) or isinstance(max_pairs, bool) or max_pairs < 1:
+            raise ValueError("max_pairs must be a positive integer.")
+    indices = torch.as_tensor(assignments).detach().cpu()
+    if indices.shape != (K,) or indices.dtype not in (
+        torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64
+    ):
+        raise ValueError("assignments must be a one-dimensional integer permutation.")
+    indices = indices.to(torch.long)
+    if not torch.equal(indices.sort().values, torch.arange(K)):
+        raise ValueError("assignments must contain every target index exactly once.")
+
+    # Each outer cell is a subfigure containing two spatial plots and,
+    # optionally, two adjacency heatmaps directly underneath them.
+    count = K if max_pairs is None else min(K, max_pairs)
+    columns = ceil(sqrt(count))
+    rows = ceil(count / columns)
+    if figsize is None:
+        figsize = (9 * columns, (8 if show_adjacency else 4.5) * rows)
+    # Notebook displays shrink large figures; enlarge text in steps to
+    # compensate. Use displayed pairs, so max_pairs also controls this scale.
+    font_scale = 1.0 if count <= 4 else 1.4 if count <= 9 else 1.8 if count <= 16 else 2.2
+    fig = plt.figure(figsize=figsize, layout="constrained")
+    if title:
+        heading = fig.suptitle(title)
+        heading.set_fontsize(heading.get_fontsize() * font_scale)
+    panels = fig.subfigures(rows, columns, squeeze=False)
+    for i, panel in enumerate(panels.flat):
+        if i >= count:
+            panel.set_visible(False)
+            continue
+        j = int(indices[i])
+        heading = panel.suptitle(f"Batch 1 [{i}] ↔ Batch 2 [{j}]")
+        heading.set_fontsize(heading.get_fontsize() * font_scale)
+        axes = panel.subplots(2 if show_adjacency else 1, 2, squeeze=False)
+        for column, (graph, batch_number, index) in enumerate(
+            ((batch_1[i], 1, i), (batch_2[j], 2, j))
+        ):
+            plot_nodes(graph, title=f"Batch {batch_number} [{index}]",
+                       ax=axes[0, column], node_size=node_size)
+            if show_adjacency:
+                # adjacency_matrix requires at least two nodes; a singleton's
+                # entry is determined directly by the presence of a self-loop.
+                if graph.num_nodes == 1:
+                    edges = getattr(graph, "edge_index", None)
+                    adjacency = torch.tensor([[float(edges is not None and edges.numel() > 0)]])
+                else:
+                    adjacency = adjacency_matrix(graph, normalized=False,
+                                                 device="cpu", sparse=False)
+                plot_heatmap(adjacency, title="Adjacency", ax=axes[1, column])
+        # Apply the same scale after drawing, including optional adjacency
+        # ticks and the label legends created by plot_nodes.
+        for ax in axes.flat:
+            ax.title.set_fontsize(ax.title.get_fontsize() * font_scale)
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_fontsize(label.get_fontsize() * font_scale)
+            legend = ax.get_legend()
+            if legend is not None:
+                for label in [legend.get_title(), *legend.get_texts()]:
+                    label.set_fontsize(label.get_fontsize() * font_scale)
     plt.show()
 
 

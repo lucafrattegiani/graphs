@@ -162,6 +162,12 @@ def bubbles(n: int, device: torch.device | str = "cpu", radius: float = 0.2,
     """
     Generate node positions in bubbles determined by spectral clustering.
 
+    Each distinct label gets a bubble, including the special labels -1 and -2.
+    These bubbles only group nodes for display; they do not reclassify them.
+    Offsets are sampled uniformly in a disk for all nodes at once. The sampling
+    distribution is unchanged, but seeded coordinates can differ from sampling
+    each community separately.
+
     Parameters
     ----------
     n : int
@@ -194,29 +200,27 @@ def bubbles(n: int, device: torch.device | str = "cpu", radius: float = 0.2,
     if graph.num_nodes != n:
         raise ValueError("graph.num_nodes must be equal to n")
 
+    # 1. Assign a label to each node, preserving the original node order.
     assignments = spectral_clustering(
         graph,
         device = device,
         K = K,
     )
-    communities = torch.unique(assignments, sorted = True)
+    # 2. Map labels to consecutive center indices. Negative or non-consecutive
+    # labels are valid: node_centers[i] identifies the center for node i.
+    communities, node_centers = torch.unique(assignments, sorted = True, return_inverse = True)
     num_communities = communities.numel()
 
+    # 3. Place a single bubble at the origin, or multiple bubbles on a polygon.
     if num_communities == 1:
         centers = torch.zeros((1, 2), device = device) #The unique center is at the origin
     else:
         centers = polygonal(num_communities, device) #Centers are vertices of a regular polygon
 
-    positions = torch.empty((n, 2), device = device)
-    for center_index, community in enumerate(communities):
-        community_nodes = assignments == community
-        community_positions = circle(
-            int(community_nodes.sum().item()),
-            device = device,
-            translation = centers[center_index],
-            radius = radius,
-        )
-        positions[community_nodes] = community_positions
+    # 4. Sample all offsets in one call, then translate each by its own center.
+    # circle uses radius * sqrt(U), which gives uniform area density in the disk.
+    offsets = circle(n, device = device, radius = radius)
+    positions = centers[node_centers] + offsets
 
     return positions
 

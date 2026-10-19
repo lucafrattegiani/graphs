@@ -34,7 +34,10 @@ def local_clustering_coeff(graph: Data, device: torch.device | str | None = None
     adj_matrix[edge_index[0], edge_index[1]] = 1
 
     # Compute local clustering coefficient
-    triangles = torch.matmul(torch.matmul(adj_matrix, adj_matrix), adj_matrix).diagonal() # Compute number of triangles for each node
+    two_step_paths = adj_matrix @ adj_matrix
+    # (A^3)[i, i] = sum_j (A^2)[i, j] * A[j, i].
+    # This counts twice the triangles at each node without constructing A^3.
+    triangles = (two_step_paths * adj_matrix.T).sum(dim = 1)
     degree = adj_matrix.sum(dim = 1) # Degree of each node
     
     # Avoid division by zero
@@ -70,9 +73,11 @@ def global_clustering_coeff(graph: Data, device: torch.device | str | None = Non
     adj_matrix[edge_index[0], edge_index[1]] = 1
 
     # Compute global clustering coefficient
-    closed_triplets = torch.matmul(torch.matmul(adj_matrix, adj_matrix), adj_matrix).diagonal().sum() # Total number of closed triplets
+    two_step_paths = adj_matrix @ adj_matrix
+    # Sum only the diagonal of A^3, using A^2 and element-wise multiplication.
+    closed_triplets = (two_step_paths * adj_matrix.T).sum()
     degree = adj_matrix.sum() # Sum of degrees (self 2-edges paths)
-    norm = torch.matmul(adj_matrix, adj_matrix).sum() # Total number of 2-edges paths
+    norm = two_step_paths.sum() # Reuse A^2 to count all two-edge paths
     total_triplets =  (norm - degree)# Total number of possible triplets
 
     # Avoid division by zero

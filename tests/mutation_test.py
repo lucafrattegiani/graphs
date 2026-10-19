@@ -13,6 +13,17 @@ import torch
 from graphtools import metrics, opt
 
 
+@pytest.mark.parametrize("input_device", DEVICES)
+def test_spectral_isolate_remapping_preserves_graph(input_device):
+    """Removing isolates internally preserves original node indices and attributes."""
+    from torch_geometric.data import Data
+    graph = Data(num_nodes=4, edge_index=torch.tensor([[1, 3], [3, 1]], device=input_device),
+                 x=torch.arange(4, device=input_device).unsqueeze(1))
+    before = snapshot(graph)
+    metrics.spectral_clustering(graph, K=2, device="cpu")
+    assert_graph_unchanged(graph, before)
+
+
 @pytest.mark.parametrize("function, kwargs, features", METRIC_CASES)
 @pytest.mark.parametrize("input_device", DEVICES)
 def test_metric_mutation(function, kwargs, features, input_device):
@@ -58,3 +69,18 @@ def test_dirichlet_mutation():
     metrics.dirichlet_energy(graph).backward()
     assert torch.isfinite(graph.x.grad).all()
     assert_graph_unchanged(graph, before)
+
+
+@pytest.mark.parametrize("input_device", DEVICES)
+@pytest.mark.parametrize("alpha", [0., 0.5, 1.])
+def test_hungarian_coupling_preserves_inputs(input_device, alpha):
+    """Preparation and CPU assignment preserve graph attributes and tensor storage."""
+    from .utils import coupling_batches
+    first, second = coupling_batches(device=input_device)
+    graphs = first + second
+    for graph in graphs:
+        graph.x.requires_grad_(True)
+    before = [snapshot(graph) for graph in graphs]
+    opt.hungarian_coupling(first, second, alpha=alpha, device="cpu", reg=1.)
+    for graph, saved in zip(graphs, before):
+        assert_graph_unchanged(graph, saved)

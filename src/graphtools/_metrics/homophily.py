@@ -204,7 +204,7 @@ def adjusted_homophily_hard(graph: Data, device: torch.device | str | None = Non
     Parameters:
     ----------
     graph : torch_geometric.data.Data
-        Graph data. It must have one discrete node attribute per node in graph.x.
+        Graph data. graph.x must contain one-hot class labels, one row per node.
     device : torch.device | str
         Computation and output device. If None, edge_index and x must
         share a device. An explicit device permits local transfers; the
@@ -219,12 +219,13 @@ def adjusted_homophily_hard(graph: Data, device: torch.device | str | None = Non
     """        
     device = _graph_device(graph, device, attributes = ("edge_index", "x"))
     # Extract data and send to device
-    attributes = graph.x.to(device)
-    labels = torch.argwhere(attributes == 1)[:, 1].long()
+    attributes = graph.x.to(device = device, dtype = torch.long)
+    # One-hot rows identify exactly one class; keep class extraction on device.
+    labels = attributes.argmax(dim = 1)
     edges = graph.edge_index.to(device)
     n = graph.num_nodes
     num_edges = edges.size(1)
-    K = labels.max().item() + 1
+    K = attributes.shape[1] # Includes unused classes without reading a GPU scalar
 
     # Compute node degrees 
     dtype = _floating_dtype(graph.x)
@@ -239,7 +240,9 @@ def adjusted_homophily_hard(graph: Data, device: torch.device | str | None = Non
     H_e = (q ** 2).sum()
 
     # Observed homophily (Mean of intra-class edge indicators)
-    H_o = hard_edge_homophily(graph, device = device)
+    # Reuse class indices and edges instead of preparing the graph a second time.
+    source, target = edges
+    H_o = (labels[source] == labels[target]).to(dtype).mean()
 
     # Adjusted homophily
     H_adj = (H_o - H_e) / (1.0 - H_e + eps)
@@ -280,6 +283,9 @@ def adjusted_homophily_soft(graph: Data, device: torch.device | str | None = Non
         return torch.tensor(torch.nan, dtype = _floating_dtype(graph.x), device = device)
     
     labels = graph.x.to(device = device, dtype = _floating_dtype(graph.x))
+    # Preserve the non-negativity check previously performed by the soft helper.
+    if (labels < 0).any():
+        raise ValueError("JSD requires non-negative node attribute distributions")
     edges = graph.edge_index.to(device)
     n = graph.num_nodes
     num_edges = edges.size(1)
@@ -293,8 +299,9 @@ def adjusted_homophily_soft(graph: Data, device: torch.device | str | None = Non
     # Expected homophily
     H_e = torch.dot(q, q)
 
-    # Observed homophily
-    H_o = soft_edge_homophily(graph, device = device, method = "euclidean")
+    # Reuse prepared tensors: each edge contributes the dot product of its labels.
+    source, target = edges
+    H_o = (labels[source] * labels[target]).sum(dim = 1).mean()
 
     H_adj = (H_o - H_e) / (1.0 - H_e + eps)
 

@@ -12,6 +12,105 @@ from graphtools import metrics, opt
 from .utils import CUDA, DEVICES, FEATURE_CASES, example_graph, output_tensors
 
 
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("sparse", [False, True])
+@pytest.mark.parametrize("case", ["empty", "singleton", "loops", "mixed", "random"])
+def test_jaccard_torch_matches_neighborhood_counting(device, sparse, case):
+    """Torch Jaccard agrees with CPU set counting, including empty and repeated edges."""
+    from .utils import snapshot, assert_graph_unchanged
+
+    if case == "empty":
+        graph = Data(num_nodes=0, edge_index=None)
+    elif case == "singleton":
+        graph = Data(num_nodes=1, edge_index=torch.empty((2, 0), dtype=torch.long))
+    elif case == "loops":
+        graph = Data(num_nodes=3, edge_index=torch.tensor([[0, 1, 2], [0, 1, 2]]))
+    elif case == "mixed":
+        # One-way edges, duplicates, a self-loop and an isolated node.
+        graph = Data(num_nodes=5, edge_index=torch.tensor([[0, 0, 1, 2, 2], [1, 1, 2, 3, 2]]))
+    else:
+        generator = torch.Generator().manual_seed(42)
+        graph = Data(num_nodes=20, edge_index=torch.randint(20, (2, 70), generator=generator))
+    # Independent reference from the definition, rather than a second Torch call.
+    neighbors = [set() for _ in range(graph.num_nodes)]
+    if graph.edge_index is not None:
+        for source, target in graph.edge_index.t().tolist():
+            if source != target:
+                neighbors[source].add(target)
+                neighbors[target].add(source)
+    expected = torch.zeros((graph.num_nodes, graph.num_nodes))
+    for i, first in enumerate(neighbors):
+        for j, second in enumerate(neighbors):
+            union = first | second
+            expected[i, j] = len(first & second) / len(union) if union else 0.0
+    graph = graph.to(device)
+    before = snapshot(graph)
+    result = metrics.jaccard_similarity_matrix(graph, device=device, sparse=sparse)
+    assert result.device.type == device
+    assert result.dtype == torch.float32
+    assert result.is_sparse == sparse
+    if sparse:
+        assert result.is_coalesced()
+        assert (result.values() > 0).all()
+    torch.testing.assert_close(result.to_dense().cpu(), expected)
+    assert_graph_unchanged(graph, before)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_bubbles_preserves_label_mapping(monkeypatch, device):
+    """Interleaved and special labels map to the correct centers in node order."""
+    from graphtools.sampling import positions
+
+    assignments = torch.tensor([7, -1, 2, -2, 7, 2], device=device)
+    monkeypatch.setattr(positions, "spectral_clustering", lambda *args, **kwargs: assignments)
+    graph = Data(num_nodes=6, edge_index=torch.empty((2, 0), dtype=torch.long))
+    result = positions.bubbles(6, graph=graph, device=device, radius=0)
+    centers = positions.polygonal(4, device=device)
+    torch.testing.assert_close(result, centers[torch.tensor([3, 1, 2, 0, 3, 2], device=device)])
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("labels", [[0, 0, 0, 0], [0, 1, 2, 3]])
+def test_bubbles_offsets_stay_in_disk(monkeypatch, device, labels):
+    """Single and multiple bubbles return finite positions within the given radius."""
+    from graphtools.sampling import positions
+
+    assignments = torch.tensor(labels, device=device)
+    monkeypatch.setattr(positions, "spectral_clustering", lambda *args, **kwargs: assignments)
+    result = positions.bubbles(4, graph=example_graph(), device=device, radius=.2)
+    centers = (torch.zeros((4, 2), device=device) if labels[0] == labels[-1]
+               else positions.polygonal(4, device=device))
+    assert result.shape == (4, 2)
+    assert result.device.type == device
+    assert torch.isfinite(result).all()
+    assert ((result - centers).norm(dim=1) <= .2 + 1e-6).all()
+
+
+def test_adjusted_hard_with_unused_classes():
+    """Unused one-hot columns leave the degree-adjusted homophily unchanged."""
+    graph = example_graph(torch.float64, features="hard")
+    graph.x = torch.cat((graph.x, torch.zeros((4, 2), dtype=torch.float64)), dim=1)
+    # One of four undirected edges joins equal classes; class degree totals are 5 and 3.
+    result = metrics.adjusted_homophily_hard(graph, eps=0)
+    torch.testing.assert_close(result, torch.tensor(-0.6, dtype=torch.float64))
+
+
+def test_adjusted_soft_known_value():
+    """A two-node graph gives observed overlap .38 and expected overlap .505."""
+    graph = Data(num_nodes=2, edge_index=torch.tensor([[0, 1], [1, 0]]),
+                 x=torch.tensor([[.8, .2], [.3, .7]], dtype=torch.float64))
+    result = metrics.adjusted_homophily_soft(graph, eps=0)
+    torch.testing.assert_close(result, torch.tensor(-25 / 99, dtype=torch.float64))
+
+
+def test_adjusted_soft_rejects_negative_features():
+    """Direct computation retains the rejection of negative soft probabilities."""
+    graph = example_graph(features="soft")
+    graph.x[0, 0] = -0.1
+    with pytest.raises(ValueError, match="non-negative"):
+        metrics.adjusted_homophily_soft(graph)
+
+
 @pytest.mark.parametrize("function, kwargs, features", FEATURE_CASES)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_feature_precision(function, kwargs, features, dtype):
@@ -139,6 +238,98 @@ def test_spectral_embedding_and_labels():
     assert labels.unique().numel() == 2
 
 
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("n", [0, 1, 4])
+@pytest.mark.parametrize("K", [None, 1, 8])
+def test_spectral_all_isolated(n, K, device):
+    """Entirely isolated graphs get a distinct label per node, regardless of K."""
+    graph = Data(num_nodes=n, edge_index=torch.empty((2, 0), dtype=torch.long))
+    result = metrics.spectral_clustering(graph, K=K, device=device)
+    torch.testing.assert_close(result, torch.arange(n, device=device))
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("K", [None, 1, 2])
+def test_spectral_mixed_isolates(K, device):
+    """Isolates retain -1 and do not affect clustering or automatic K selection."""
+    graph = Data(num_nodes=5, edge_index=torch.tensor([[1, 3], [3, 1]]))
+    result = metrics.spectral_clustering(graph, K=K, device=device)
+    assert result.device.type == device
+    assert (result[[0, 2, 4]] == -1).all()
+    assert (result[[1, 3]] >= 0).all()
+    assert result[[1, 3]].unique().numel() == (1 if K is None else K)
+
+
+def test_spectral_k_excludes_isolates():
+    """An explicit K cannot count isolated nodes as available cluster members."""
+    graph = Data(num_nodes=5, edge_index=torch.tensor([[1, 3], [3, 1]]))
+    with pytest.raises(ValueError, match="non-isolated"):
+        metrics.spectral_clustering(graph, K=3)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_spectral_unusable_rows(monkeypatch, device):
+    """Zero, NaN and infinite rows get -2; tiny usable rows still reach K-means."""
+    from graphtools._metrics import spectral
+
+    graph = Data(num_nodes=8, edge_index=torch.tensor(
+        [[1, 2, 2, 3, 3, 4, 4, 5, 5, 6], [2, 1, 3, 2, 4, 3, 5, 4, 6, 5]]))
+
+    def embedding(subgraph, K, device, normalized):
+        assert subgraph.num_nodes == 6
+        assert subgraph.edge_index.max() == 5
+        assert not normalized
+        return torch.tensor([[0., 0.], [float("nan"), 1.], [float("inf"), 0.],
+                             [1e-12, 0.], [0., 1.], [1., 1.]], device=device)
+
+    class CheckedKMeans:
+        def __init__(self, **kwargs):
+            assert kwargs["n_clusters"] == 2
+
+        def __call__(self, coordinates):
+            from types import SimpleNamespace
+            assert coordinates.shape == (1, 3, 2)
+            assert torch.isfinite(coordinates).all()
+            torch.testing.assert_close(coordinates.norm(dim=-1), coordinates.new_ones((1, 3)))
+            return SimpleNamespace(labels=torch.tensor([[0, 1, 1]], device=device))
+
+    monkeypatch.setattr(spectral, "spectral_embedding", embedding)
+    monkeypatch.setattr(spectral, "KMeans", CheckedKMeans)
+    result = metrics.spectral_clustering(graph, K=2, device=device)
+    torch.testing.assert_close(result, torch.tensor([-1, -2, -2, -2, 0, 1, 1, -1], device=device))
+
+
+@pytest.mark.parametrize("remaining", [0, 1, 2])
+def test_spectral_few_usable_nodes(monkeypatch, remaining):
+    """Numerical exclusions can leave no nodes or require reducing K."""
+    from graphtools._metrics import spectral
+
+    def embedding(*args, **kwargs):
+        rows = torch.zeros((4, 3))
+        rows[:remaining, 0] = 1
+        return rows
+
+    monkeypatch.setattr(spectral, "spectral_embedding", embedding)
+    labels = metrics.spectral_clustering(example_graph(), K=3)
+    torch.testing.assert_close(labels[:remaining], torch.arange(remaining))
+    assert (labels[remaining:] == -2).all()
+
+
+@pytest.mark.parametrize("failure", ["solver", "nonfinite"])
+def test_spectral_failed_spectrum(monkeypatch, failure):
+    """Failed spectral analysis marks connected nodes -2 while keeping isolates -1."""
+    from graphtools._metrics import spectral
+
+    def decomposition(*args, **kwargs):
+        if failure == "solver":
+            raise torch.linalg.LinAlgError("eigensolver did not converge")
+        return torch.tensor([float("nan"), 0.]), torch.eye(2)
+
+    monkeypatch.setattr(spectral, "spectral_decomposition", decomposition)
+    graph = Data(num_nodes=3, edge_index=torch.tensor([[0, 1], [1, 0]]))
+    torch.testing.assert_close(metrics.spectral_clustering(graph), torch.tensor([-2, -2, -1]))
+
+
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_gini_precision(dtype):
     """Check the known Gini value and the dtype of an empty-input NaN."""
@@ -200,3 +391,81 @@ def test_pagerank_probability_mass(device):
     assert torch.isfinite(result).all()
     assert torch.all(result >= 0)
     torch.testing.assert_close(result.sum(), result.new_tensor(1.))
+
+
+@pytest.mark.parametrize("alpha", [0., 0.5, 1.])
+@pytest.mark.parametrize("pair_batch_size", [1, 4, 9])
+def test_hungarian_coupling_known_costs(alpha, pair_batch_size):
+    """All cross costs and the unique assignment match an analytic FGW example."""
+    from .utils import coupling_batches
+    first, second = coupling_batches(dtype=torch.float64)
+    # Constant features/structures make the cost independent of the node plan.
+    first[0].C = first[0].C.to_sparse()
+    W, info = opt.hungarian_coupling(first, second, alpha=alpha,
+                                  pair_batch_size=pair_batch_size, reg=1.)
+    delta = torch.tensor([0., 2., 5.], dtype=torch.float64)[:, None] - torch.tensor([5., 0., 2.])
+    expected = ((1 - alpha) + alpha / 4) * delta.square()
+    torch.testing.assert_close(info["C"], expected)
+    assert info["assignment"].tolist() == [1, 2, 0]
+    torch.testing.assert_close(W.sum(0), W.new_full((3,), 1 / 3))
+    torch.testing.assert_close(W.sum(1), W.new_full((3,), 1 / 3))
+    assert torch.count_nonzero(W) == 3
+    torch.testing.assert_close(info["cost"], W.new_zeros(()), atol=1e-12, rtol=0)
+    assert W.dtype == torch.float64
+    assert set(info) == {"C", "assignment", "cost"}
+
+
+@pytest.mark.parametrize("alpha", [0., 1.])
+def test_hungarian_coupling_ignores_unused_attributes(alpha):
+    """Endpoint objectives require only their active attributes and dtype."""
+    from .utils import coupling_batches
+    first, second = coupling_batches()
+    for graph in first + second:
+        if alpha == 0:
+            del graph.C
+            del graph.h
+        else:
+            del graph.x
+    W, info = opt.hungarian_coupling(first, second, alpha=alpha, reg=1.)
+    for graph in first + second:
+        unused = ("C", "h") if alpha == 0 else ("x",)
+        for name in unused:
+            graph[name] = torch.tensor([float("nan")], dtype=torch.float64)
+    W_again, info_again = opt.hungarian_coupling(first, second, alpha=alpha, reg=1.)
+    torch.testing.assert_close(W_again, W)
+    torch.testing.assert_close(info_again["C"], info["C"])
+    assert info_again["C"].dtype == torch.float32
+
+
+@pytest.mark.parametrize("case", ["empty", "unequal", "node_counts", "missing_C", "feature_width", "masses"])
+def test_hungarian_coupling_rejects_incompatible_batches(case):
+    """Reject malformed batches before calling the numerical solver."""
+    from .utils import coupling_batches
+    first, second = coupling_batches()
+    if case == "empty":
+        first, second = [], []
+    elif case == "unequal":
+        second.pop()
+    elif case == "node_counts":
+        first[0].num_nodes = 4
+    elif case == "missing_C":
+        del first[0].C
+    elif case == "feature_width":
+        for graph in second:
+            graph.x = graph.x.repeat(1, 2)
+    else:
+        first[0].h *= 2
+    with pytest.raises(ValueError):
+        opt.hungarian_coupling(first, second)
+
+
+@pytest.mark.parametrize("alpha, expected", [(0., 2.), (0.5, 1.5), (1., 0.)])
+def test_hungarian_coupling_node_masses(alpha, expected):
+    """Nonuniform node masses affect FGW, while alpha zero uses uniform masses."""
+    first = Data(num_nodes=2, C=torch.zeros(2, 2), x=torch.tensor([[0.], [2.]]),
+                 h=torch.tensor([0.25, 0.75], dtype=torch.float64))
+    second = Data(num_nodes=1, C=torch.zeros(1, 1), x=torch.zeros(1, 1))
+    W, info = opt.hungarian_coupling([first], [second], alpha=alpha, reg=1.)
+    torch.testing.assert_close(info["C"], info["C"].new_tensor([[expected]]))
+    torch.testing.assert_close(W, W.new_ones((1, 1)))
+    assert W.dtype == (torch.float32 if alpha == 0 else torch.float64)

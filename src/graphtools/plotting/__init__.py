@@ -1,7 +1,8 @@
 """Plotting utilities for graph data and spatial structures."""
 
 from .plotting import (
-    plot_coupling,
+    plot_coupling_fgw,
+    plot_coupling_hungarian,
     plot_elbow,
     plot_epsilon_voronoi,
     plot_graph,
@@ -14,7 +15,8 @@ from .plotting import (
 )
 
 __all__ = [
-    "plot_coupling",
+    "plot_coupling_fgw",
+    "plot_coupling_hungarian",
     "plot_elbow",
     "plot_epsilon_voronoi",
     "plot_graph",

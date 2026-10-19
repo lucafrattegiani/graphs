@@ -124,3 +124,17 @@ def output_tensors(result):
     if isinstance(result, tuple):
         return [tensor for value in result for tensor in output_tensors(value)]
     raise TypeError(f"Unexpected result type: {type(result).__name__}")
+
+
+def coupling_batches(dtype=torch.float32, device="cpu"):
+    """Two reversed graph batches with constant attributes and known FGW costs."""
+    def graph(n, value):
+        return Data(
+            num_nodes=n,
+            edge_index=torch.empty((2, 0), dtype=torch.long, device=device),
+            x=torch.full((n, 1), value, dtype=dtype, device=device),
+            C=torch.full((n, n), value / 2, dtype=dtype, device=device),
+            h=torch.arange(1, n + 1, dtype=dtype, device=device) / (n * (n + 1) / 2),
+        )
+    return ([graph(2, v) for v in (0., 2., 5.)],
+            [graph(3, v) for v in (5., 0., 2.)])
