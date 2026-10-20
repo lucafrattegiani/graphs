@@ -3,6 +3,7 @@ from scipy.optimize import linear_sum_assignment
 from torch_geometric.data import Data
 import torch
 import ot
+from tqdm.auto import tqdm
 
 from ..validity import _graph_device, _floating_dtype
 from ..utils.preprocessing import prepare_batches
@@ -21,6 +22,7 @@ def hungarian_coupling(
     tol: float = 1e-5,
     max_iter_inner: int = 100,
     tol_inner: float = 1e-6,
+    verbose: bool = True,
 ) -> tuple[torch.Tensor, dict]:
     """
     Computes an optimal uniform coupling between two batches of graphs:
@@ -77,6 +79,12 @@ def hungarian_coupling(
         Nonnegative inner stopping tolerance on the maximum, across pairs,
         of the L2 row-marginal residual, checked periodically by POT.
 
+    verbose : bool, default = True
+        Print the FGW device and display a progress bar over all K*K graph
+        pairs. The bar updates after each chunk, showing elapsed time and
+        estimated remaining time. The final linear assignment runs on CPU.
+        False disables both messages and the progress bar.
+
     Returns:
     -------
     tuple[torch.Tensor, dict]
@@ -111,6 +119,8 @@ def hungarian_coupling(
         raise ValueError("Tolerances must be finite and nonnegative.")
 
     device = _graph_device(batch_1[0], device)
+    if verbose:
+        print(f"FGW device: {device} | Linear assignment device: cpu", flush=True)
     # Select only attributes used by the chosen objective.
     attributes = ("x",) if alpha == 0 else (("C", "h", "x") if alpha < 1 else ("C", "h"))
     dtype = _floating_dtype(*(getattr(g, name, None)
@@ -130,27 +140,32 @@ def hungarian_coupling(
     # Compute every cross-batch cost, grouping only the numerical FGW solves.
     # Each pair of groups has fixed node counts, even for heterogeneous inputs.
     C = torch.empty((K, K), device=device, dtype=dtype)
-    for group_1 in groups_1.values():
-        for group_2 in groups_2.values():
-            C1, h1, x1 = group_1["C"], group_1["h"], group_1["x"]
-            C2, h2, x2 = group_2["C"], group_2["h"], group_2["x"]
-            count_1, count_2 = C1.shape[0], C2.shape[0]
-            # Flatten the rectangular group-pair block, then solve in chunks
-            # to limit memory. There is no local matching within these blocks.
-            for start in range(0, count_1 * count_2, pair_batch_size):
-                stop = min(start + pair_batch_size, count_1 * count_2)
-                pairs = torch.arange(start, stop, device=device)
-                i, j = pairs // count_2, pairs % count_2
-                M = (torch.cdist(x1[i], x2[j]).square() if alpha < 1
-                     else C1.new_zeros((stop - start, C1.shape[1], C2.shape[1])))
-                result = ot.batch.solve_gromov_batch(
-                    Ca=C1[i], Cb=C2[j], a=h1[i], b=h2[j], M=M,
-                    alpha=alpha, loss="sqeuclidean", symmetric=True, reg=reg,
-                    max_iter=max_iter, tol=tol,
-                    max_iter_inner=max_iter_inner, tol_inner=tol_inner, grad="detach",
-                )
-                # Restore original batch positions, rather than group order.
-                C[group_1["indices"][i], group_2["indices"][j]] = result.value
+    with tqdm(total=K * K, desc=f"FGW costs ({C.device})", unit="pair",
+              disable=not verbose, dynamic_ncols=True) as progress:
+        for group_1 in groups_1.values():
+            for group_2 in groups_2.values():
+                C1, h1, x1 = group_1["C"], group_1["h"], group_1["x"]
+                C2, h2, x2 = group_2["C"], group_2["h"], group_2["x"]
+                count_1, count_2 = C1.shape[0], C2.shape[0]
+                # Flatten the rectangular group-pair block, then solve in chunks
+                # to limit memory. There is no local matching within these blocks.
+                for start in range(0, count_1 * count_2, pair_batch_size):
+                    stop = min(start + pair_batch_size, count_1 * count_2)
+                    pairs = torch.arange(start, stop, device=device)
+                    i, j = pairs // count_2, pairs % count_2
+                    M = (torch.cdist(x1[i], x2[j]).square() if alpha < 1
+                         else C1.new_zeros((stop - start, C1.shape[1], C2.shape[1])))
+                    result = ot.batch.solve_gromov_batch(
+                        Ca=C1[i], Cb=C2[j], a=h1[i], b=h2[j], M=M,
+                        alpha=alpha, loss="sqeuclidean", symmetric=True, reg=reg,
+                        max_iter=max_iter, tol=tol,
+                        max_iter_inner=max_iter_inner, tol_inner=tol_inner, grad="detach",
+                    )
+                    # Restore original batch positions, rather than group order.
+                    C[group_1["indices"][i], group_2["indices"][j]] = result.value
+
+                    # Count pairs, not chunks: groups and final chunks vary in size.
+                    progress.update(stop - start)
 
     # Find one global optimal coupling after filling all K*K costs.
     if not torch.isfinite(C).all():

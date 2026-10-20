@@ -51,7 +51,7 @@ def sbm_graphon(x: torch.Tensor, y: torch.Tensor,
         Connection probabilities in [0, 1].
     """
     if block_probs is None:
-        block_probs = x.new_tensor([[0.8, 0.1], [0.1, 0.8]])
+        block_probs = x.new_tensor([[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]])
     else:
         block_probs = torch.as_tensor(block_probs, dtype = x.dtype, device = x.device)
 

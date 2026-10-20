@@ -18,6 +18,7 @@ dependencies = [
     "torch",
     "torch-geometric",
     "torch-kmeans",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
