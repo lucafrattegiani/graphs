@@ -725,6 +725,7 @@ def plot_coupling_hungarian(
     assignments: torch.Tensor | Sequence[int], *,
     max_pairs: int | None = None,
     show_adjacency: bool = False,
+    voronoi: bool = False,
     figsize: tuple[float, float] | None = None,
     title: str = "Hungarian graph matching",
     node_size: float | None = None,
@@ -749,12 +750,16 @@ def plot_coupling_hungarian(
         Draw each graph's adjacency matrix below its spatial plot. Matrices
         are computed on CPU from edge_index, not taken from graph.C.
         Colorbars are omitted, following plot_heatmap's default.
+    voronoi : bool, default = False
+        Draw the Voronoi cells stored in each graph.cells behind its nodes,
+        using plot_nodes. Cells must already be available when enabled.
     figsize : tuple[float, float] | None, default = None
         Overall figure size in inches. If None, scale the figure to the grid.
         For n displayed pairs, columns = ceil(sqrt(n)) and
         rows = ceil(n / columns). Unused grid cells are hidden.
     title : str, default = "Hungarian graph matching"
-        Overall figure title; each grid cell also identifies its matched pair.
+        Overall figure title, displayed in bold. Individual graph titles
+        identify their batch and original index; pair titles are omitted.
     node_size : float | None, default = None
         Node marker area passed to plot_nodes; None uses its automatic size.
 
@@ -795,7 +800,7 @@ def plot_coupling_hungarian(
     font_scale = 1.0 if count <= 4 else 1.4 if count <= 9 else 1.8 if count <= 16 else 2.2
     fig = plt.figure(figsize=figsize, layout="constrained")
     if title:
-        heading = fig.suptitle(title)
+        heading = fig.suptitle(title, fontweight="bold")
         heading.set_fontsize(heading.get_fontsize() * font_scale)
     panels = fig.subfigures(rows, columns, squeeze=False)
     for i, panel in enumerate(panels.flat):
@@ -803,14 +808,12 @@ def plot_coupling_hungarian(
             panel.set_visible(False)
             continue
         j = int(indices[i])
-        heading = panel.suptitle(f"Batch 1 [{i}] ↔ Batch 2 [{j}]")
-        heading.set_fontsize(heading.get_fontsize() * font_scale)
         axes = panel.subplots(2 if show_adjacency else 1, 2, squeeze=False)
         for column, (graph, batch_number, index) in enumerate(
             ((batch_1[i], 1, i), (batch_2[j], 2, j))
         ):
             plot_nodes(graph, title=f"Batch {batch_number} [{index}]",
-                       ax=axes[0, column], node_size=node_size)
+                       ax=axes[0, column], node_size=node_size, voronoi=voronoi)
             if show_adjacency:
                 # adjacency_matrix requires at least two nodes; a singleton's
                 # entry is determined directly by the presence of a self-loop.
