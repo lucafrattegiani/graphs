@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from copy import deepcopy
 from math import ceil, sqrt
 
 #Torch data and computations
@@ -6,6 +7,7 @@ import numpy as np
 import torch
 from scipy.spatial import Voronoi, voronoi_plot_2d
 from shapely.geometry import Polygon
+from shapely.affinity import translate
 from torch_geometric.data import Data
 
 #Plotting
@@ -183,7 +185,7 @@ def plot_epsilon_voronoi(cells: list[Polygon],
 def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = None,
                    directed: bool = False, title: str = "", ax: Axes | None = None,
                    labels: torch.Tensor | None = None,
-                   voronoi: Voronoi | list[Polygon] | None = None,
+                   voronoi: Voronoi | list[Polygon] | tuple[Voronoi | list[Polygon], ...] | None = None,
                    node_size: float | None = None,
                    names_labels: list[str] | None = None) -> None:
     """Plot two-dimensional positions with translucent fills and opaque borders.
@@ -207,7 +209,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         ``[num_nodes]`` or ``[num_nodes, 1]``.
     voronoi : scipy.spatial.Voronoi | list[shapely.geometry.Polygon] | None, default = None
         Optional standard or epsilon-Voronoi tessellation to draw behind the
-        positions.
+        positions. A tuple may contain multiple independently positioned
+        tessellations, as used when aligning two graphs.
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
@@ -306,20 +309,22 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     else:
         fig = ax.figure
 
-    if isinstance(voronoi, Voronoi):
-        plot_voronoi(voronoi, title = title, ax = ax)
-    elif isinstance(voronoi, list):
-        plot_epsilon_voronoi(voronoi, title = title, ax = ax)
-        nonempty_cells = [cell for cell in voronoi if not cell.is_empty]
-        if nonempty_cells:
-            cell_bounds = np.asarray([cell.bounds for cell in nonempty_cells])
-            plot_min = np.minimum(plot_min, cell_bounds[:, :2].min(axis = 0))
-            plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis = 0))
-    elif voronoi is not None:
-        raise TypeError(
-            "voronoi must be a scipy.spatial.Voronoi object, "
-            "a list of shapely.geometry.Polygon objects, or None"
-        )
+    tessellations = voronoi if isinstance(voronoi, tuple) else (voronoi,)
+    for cells in tessellations:
+        if isinstance(cells, Voronoi):
+            plot_voronoi(cells, title = title, ax = ax)
+        elif isinstance(cells, list):
+            plot_epsilon_voronoi(cells, title = title, ax = ax)
+            nonempty_cells = [cell for cell in cells if not cell.is_empty]
+            if nonempty_cells:
+                cell_bounds = np.asarray([cell.bounds for cell in nonempty_cells])
+                plot_min = np.minimum(plot_min, cell_bounds[:, :2].min(axis = 0))
+                plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis = 0))
+        elif cells is not None:
+            raise TypeError(
+                "cells must be a scipy.spatial.Voronoi object, "
+                "a list of shapely.geometry.Polygon objects, or None"
+            )
 
     if num_edges > 0:
         ax.add_collection(
@@ -389,7 +394,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
 def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
                         title: str = "Node alignment", figsize: tuple[float, float] = (12, 6),
                         ax: Axes | None = None, node_size: float | None = None,
-                        linewidth: float = 2.0) -> None:
+                        linewidth: float = 2.0, voronoi: bool = False) -> None:
     """Plot two graphs' node positions and the coupling between their nodes.
 
     Parameters
@@ -416,6 +421,11 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
     linewidth : float, default = 2.0
         Width in points of the strongest connection. Other widths are
         proportional to their coupling value relative to the maximum.
+
+    voronoi : bool, default = False
+        Draw graph.cells when present. Standard Voronoi objects and polygon
+        lists are translated with the node positions on local copies.
+        Missing cells are skipped; no tessellation is computed here.
 
     Returns
     -------
@@ -461,12 +471,35 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
             axis = "Row" if index == 1 else "Column"
             raise ValueError(f"{axis} sums of coupling must match graph_{index}'s node histogram")
 
+    if not isinstance(voronoi, bool):
+        raise TypeError("voronoi must be a boolean")
+
     positions = [graph.pos.detach().cpu().clone() for graph in (graph_1, graph_2)]
     for pos in positions:
         pos[:, 0] -= pos[:, 0].min()
         pos[:, 1] -= (pos[:, 1].min() + pos[:, 1].max()) / 2
     span = max(float((pos.amax(dim = 0) - pos.amin(dim = 0)).max()) for pos in positions)
     positions[1][:, 0] += positions[0][:, 0].max() + 0.3 * max(span, 1.0)
+
+    # Apply exactly the same translation to the stored cells as to the nodes.
+    # Never recompute tessellations or modify graph.cells / graph.pos.
+    shifted_cells = []
+    if voronoi:
+        for graph, pos in zip((graph_1, graph_2), positions):
+            cells = getattr(graph, "cells", None)
+            offset = (pos[0] - graph.pos[0].detach().cpu()).numpy()
+            if isinstance(cells, Voronoi):
+                cells = deepcopy(cells)
+                cells.points[:] += offset
+                cells.vertices[:] += offset
+                cells.min_bound[:] += offset
+                cells.max_bound[:] += offset
+                shifted_cells.append(cells)
+            elif isinstance(cells, list):
+                shifted_cells.append([translate(cell, xoff=float(offset[0]),
+                                                yoff=float(offset[1])) for cell in cells])
+            elif cells is not None:
+                raise TypeError("graph.cells must be a Voronoi object or a list of polygons")
 
     standalone = ax is None
     if standalone:
@@ -478,7 +511,8 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
     labels = torch.cat([torch.full((len(pos),), index, dtype = torch.long)
                         for index, pos in enumerate(positions)])
     plot_positions(torch.cat(positions), ax = ax, title = title, labels = labels,
-                   node_size = node_size, names_labels = ["Graph 1", "Graph 2"])
+                   node_size = node_size, names_labels = ["Graph 1", "Graph 2"],
+                   voronoi = tuple(shifted_cells) if voronoi else None)
     ax.get_legend().set_title("")
 
     source, target = torch.nonzero(weights > 0, as_tuple = True)
@@ -664,7 +698,7 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
 def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
                   title: str = "Coupling", figsize: tuple[float, float] = (15, 7),
                   node_size: float | None = None, linewidth: float = 2.0,
-                  show_marginals: bool = False) -> None:
+                  show_marginals: bool = False, voronoi: bool = False) -> None:
     """Plot a coupling heatmap and node alignment side by side.
 
     Parameters
@@ -688,6 +722,10 @@ def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
     show_marginals : bool, default = False
         Whether to show column and row sums above and beside the heatmap.
 
+    voronoi : bool, default = False
+        Draw available graph.cells behind the aligned nodes. Passed to
+        plot_node_alignment; cells are translated together with the nodes.
+
     Returns
     -------
     None
@@ -703,7 +741,11 @@ def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
             ax = axes[1],
             node_size = node_size,
             linewidth = linewidth,
+            voronoi = voronoi,
         )
+        legend = axes[1].get_legend()
+        if legend is not None:
+            legend.remove()
         matrix = coupling.to_dense() if coupling.layout != torch.strided else coupling
         plot_heatmap(
             matrix,
@@ -758,8 +800,8 @@ def plot_coupling_hungarian(
         For n displayed pairs, columns = ceil(sqrt(n)) and
         rows = ceil(n / columns). Unused grid cells are hidden.
     title : str, default = "Hungarian graph matching"
-        Overall figure title, displayed in bold. Individual graph titles
-        identify their batch and original index; pair titles are omitted.
+        Overall figure title, displayed in bold. Each subplot title identifies
+        the matched batch indices; individual graph titles are omitted.
     node_size : float | None, default = None
         Node marker area passed to plot_nodes; None uses its automatic size.
 
@@ -808,11 +850,12 @@ def plot_coupling_hungarian(
             panel.set_visible(False)
             continue
         j = int(indices[i])
+        heading = panel.suptitle(f"Batch 1 [{i}] ↔ Batch 2 [{j}]")
+        heading.set_fontsize(heading.get_fontsize() * font_scale)
         axes = panel.subplots(2 if show_adjacency else 1, 2, squeeze=False)
-        for column, (graph, batch_number, index) in enumerate(
-            ((batch_1[i], 1, i), (batch_2[j], 2, j))
-        ):
-            plot_nodes(graph, title=f"Batch {batch_number} [{index}]",
+        for column, graph in enumerate((batch_1[i], batch_2[j])):
+            # A blank space suppresses plot_nodes' automatic node/edge title.
+            plot_nodes(graph, title=" ",
                        ax=axes[0, column], node_size=node_size, voronoi=voronoi)
             if show_adjacency:
                 # adjacency_matrix requires at least two nodes; a singleton's
