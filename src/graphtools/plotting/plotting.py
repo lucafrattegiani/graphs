@@ -19,8 +19,10 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from ..utils.matrices import adjacency_matrix
+from .colors import set_colors, color_labels
 
-_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.8)
+_VORONOI_FACE_ALPHA = 0.3
+_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = _VORONOI_FACE_ALPHA)
 _VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
 _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
@@ -64,18 +66,58 @@ def rescale(positions: torch.Tensor, lim_inf: float = -1.0, lim_sup: float = 1.0
     return positions
 
 
+def _bounded_voronoi_cells(voronoi: Voronoi, lower: np.ndarray,
+                           upper: np.ndarray) -> list[np.ndarray]:
+    """Clip each site's cell to the display rectangle, including infinite cells."""
+    # A Voronoi cell is the intersection of half-planes closer to its site
+    # than to each neighboring site. Clip a rectangle against those bisectors.
+    neighbors = [[] for _ in voronoi.points]
+    for i, j in voronoi.ridge_points:
+        neighbors[i].append(j)
+        neighbors[j].append(i)
+    rectangle = np.array([[lower[0], lower[1]], [upper[0], lower[1]],
+                          [upper[0], upper[1]], [lower[0], upper[1]]])
+    cells = []
+    for i, point in enumerate(voronoi.points):
+        polygon = rectangle.copy()
+        for j in neighbors[i]:
+            if len(polygon) == 0:
+                break
+            other = voronoi.points[j]
+            normal = other - point
+            midpoint = (other + point) / 2
+            distances = (polygon - midpoint) @ normal
+            clipped = []
+            for k, end in enumerate(polygon):
+                start = polygon[k - 1]
+                d_start, d_end = distances[k - 1], distances[k]
+                if (d_start <= 0) != (d_end <= 0):
+                    clipped.append(start + (end - start) * d_start / (d_start - d_end))
+                if d_end <= 0:
+                    clipped.append(end)
+            polygon = np.asarray(clipped).reshape(-1, 2)
+        cells.append(polygon)
+    return cells
+
+
 def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
-                 ax: Axes | None = None) -> None:
+                 ax: Axes | None = None, colors: np.ndarray | None = None,
+                 bounds: tuple[np.ndarray, np.ndarray] | None = None) -> None:
     """Plot Voronoi cells without drawing their generating points.
 
     Parameters
     ----------
+    bounds : tuple[numpy.ndarray, numpy.ndarray] | None, default = None
+        Lower and upper display corners used to clip infinite colored cells.
     voronoi : scipy.spatial.Voronoi
         Voronoi tessellation to plot.
     title : str, default = "Voronoi tessellation"
         Title displayed above the plot.
     ax : matplotlib.axes.Axes | None, default = None
         Axes on which to draw. If None, a new figure is created and displayed.
+
+    colors : numpy.ndarray | None, default = None
+        RGB colors [n, 3] in generating-node order. Cells use a translucent fill.
 
     Returns
     -------
@@ -94,18 +136,21 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
     else:
         fig = ax.figure
 
-    # Standard cells cover the whole plane, including infinite regions.
-    # Use a separate patch: axis("off") hides the axes' own facecolor.
-    # Axes coordinates keep the fill aligned when plot_positions changes limits.
-    ax.add_artist(
-        Rectangle(
-            (0, 0), 1, 1,
-            transform = ax.transAxes,
-            facecolor = _VORONOI_FACE_COLOR,
-            edgecolor = "none",
-            zorder = 0,
-        )
-    )
+    if colors is None:
+        ax.add_artist(Rectangle((0, 0), 1, 1, transform=ax.transAxes,
+                                facecolor=_VORONOI_FACE_COLOR, edgecolor="none", zorder=0))
+    else:
+        if np.shape(colors) != (len(voronoi.points), 3):
+            raise ValueError("colors must have shape [number of Voronoi sites, 3]")
+        if bounds is None:
+            lower, upper = voronoi.points.min(0), voronoi.points.max(0)
+            padding = 0.1 * max(float((upper - lower).max()), 1.0)
+            bounds = (lower - padding, upper + padding)
+        for coordinates, color in zip(_bounded_voronoi_cells(voronoi, *bounds), colors):
+            if len(coordinates) >= 3:
+                ax.fill(coordinates[:, 0], coordinates[:, 1],
+                        facecolor=to_rgba(color, _VORONOI_FACE_ALPHA),
+                        edgecolor="none", zorder=0)
 
     voronoi_plot_2d(
         voronoi,
@@ -116,6 +161,10 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
         line_width = _VORONOI_EDGE_WIDTH,
         line_alpha = _VORONOI_EDGE_ALPHA,
     )
+
+    if colors is not None:
+        ax.set_xlim(bounds[0][0], bounds[1][0])
+        ax.set_ylim(bounds[0][1], bounds[1][1])
 
     ax.set_title(title)
     ax.set_aspect("equal", adjustable = "box")
@@ -128,7 +177,8 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
 
 def plot_epsilon_voronoi(cells: list[Polygon],
                          title: str = "Epsilon-Voronoi tessellation",
-                         ax: Axes | None = None) -> None:
+                         ax: Axes | None = None,
+                         colors: np.ndarray | None = None) -> None:
     """Plot epsilon-Voronoi cells without drawing their generating points.
 
     Parameters
@@ -139,6 +189,9 @@ def plot_epsilon_voronoi(cells: list[Polygon],
         Title displayed above the plot.
     ax : matplotlib.axes.Axes | None, default = None
         Axes on which to draw. If None, a new figure is created and displayed.
+
+    colors : numpy.ndarray | None, default = None
+        RGB colors [n, 3] in generating-node order. Cells use a translucent fill.
 
     Returns
     -------
@@ -159,7 +212,9 @@ def plot_epsilon_voronoi(cells: list[Polygon],
     else:
         fig = ax.figure
 
-    for cell in cells:
+    if colors is not None and np.shape(colors) != (len(cells), 3):
+        raise ValueError("colors must have shape [number of cells, 3]")
+    for index, cell in enumerate(cells):
         if cell.is_empty:
             continue
 
@@ -167,7 +222,8 @@ def plot_epsilon_voronoi(cells: list[Polygon],
         ax.fill(
             coordinates[:, 0],
             coordinates[:, 1],
-            facecolor = _VORONOI_FACE_COLOR,
+            facecolor = (_VORONOI_FACE_COLOR if colors is None
+                         else to_rgba(colors[index], _VORONOI_FACE_ALPHA)),
             edgecolor = _VORONOI_EDGE_COLOR,
             linewidth = _VORONOI_EDGE_WIDTH,
         )
@@ -187,7 +243,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                    labels: torch.Tensor | None = None,
                    voronoi: Voronoi | list[Polygon] | tuple[Voronoi | list[Polygon], ...] | None = None,
                    node_size: float | None = None,
-                   names_labels: list[str] | None = None) -> None:
+                   labels_names: list[str] | None = None,
+               palette: str | None = None) -> None:
     """Plot two-dimensional positions with translucent fills and opaque borders.
 
     Parameters
@@ -205,8 +262,8 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     ax : matplotlib.axes.Axes | None, default = None
         Axes on which to draw. If None, a new figure is created and displayed.
     labels : torch.Tensor | None, default = None
-        Optional integer class assignment for each position, with shape
-        ``[num_nodes]`` or ``[num_nodes, 1]``.
+        Optional probability matrix of shape ``[num_nodes, K]``. Each row
+        sums to one; one-hot rows represent hard assignments.
     voronoi : scipy.spatial.Voronoi | list[shapely.geometry.Polygon] | None, default = None
         Optional standard or epsilon-Voronoi tessellation to draw behind the
         positions. A tuple may contain multiple independently positioned
@@ -214,9 +271,10 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
-    names_labels : list[str] | None, default = None
-        Optional names shown in the legend, ordered according to the sorted
-        unique values in ``labels``.
+    palette : str | None, default = None
+        Shared categorical palette name; None uses the global default.
+    labels_names : list[str] | None, default = None
+        Optional K category names in column order; defaults to 0, ..., K-1.
 
     Returns
     -------
@@ -234,29 +292,18 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     num_nodes = positions.shape[0]
     nodes = positions.detach().cpu().numpy()
 
+    node_colors = None
+    pure_colors = None
     if labels is not None:
-        if not isinstance(labels, torch.Tensor):
-            raise TypeError("labels must be a torch.Tensor")
-        if labels.ndim == 2 and labels.shape == (num_nodes, 1):
-            labels = labels.squeeze(1)
-        elif labels.ndim != 1 or labels.numel() != num_nodes:
-            raise ValueError("labels must have shape [num_nodes] or [num_nodes, 1]")
-        if (
-            labels.dtype == torch.bool
-            or torch.is_floating_point(labels)
-            or torch.is_complex(labels)
-        ):
-            raise TypeError("labels must contain integers")
-        labels = labels.detach().cpu().numpy()
-
-    unique_labels = np.unique(labels) if labels is not None else np.empty(0)
-    if names_labels is not None:
-        if not all(isinstance(name, str) for name in names_labels):
-            raise TypeError("names_labels must contain only strings")
-        if len(names_labels) != len(unique_labels):
-            raise ValueError(
-                "names_labels must contain one name for each unique label"
-            )
+        if not isinstance(labels, torch.Tensor) or labels.ndim != 2 or labels.shape[0] != num_nodes:
+            raise ValueError("labels must have shape [num_nodes, K]")
+        pure_colors = set_colors(labels.shape[1], palette)
+        node_colors = color_labels(labels, pure_colors).detach().cpu().numpy()
+    if labels_names is not None:
+        if pure_colors is None or len(labels_names) != len(pure_colors):
+            raise ValueError("labels_names must contain one name per category")
+        if not all(isinstance(name, str) for name in labels_names):
+            raise TypeError("labels_names must contain only strings")
 
     if edge_index is not None and edge_index.numel() > 0:
         links = edge_index.detach().cpu().numpy()
@@ -310,21 +357,26 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         fig = ax.figure
 
     tessellations = voronoi if isinstance(voronoi, tuple) else (voronoi,)
+    offset = 0
     for cells in tessellations:
+        # Empty polygons preserve node indexing when an aligned graph has no cells.
+        count = len(cells.points) if isinstance(cells, Voronoi) else len(cells) if isinstance(cells, list) else 0
+        cell_colors = None if node_colors is None else node_colors[offset:offset + count]
+        offset += count
         if isinstance(cells, Voronoi):
-            plot_voronoi(cells, title = title, ax = ax)
+            plot_voronoi(cells, title=title, ax=ax, colors=cell_colors,
+                         bounds=(plot_min, plot_max))
         elif isinstance(cells, list):
-            plot_epsilon_voronoi(cells, title = title, ax = ax)
+            plot_epsilon_voronoi(cells, title=title, ax=ax, colors=cell_colors)
             nonempty_cells = [cell for cell in cells if not cell.is_empty]
             if nonempty_cells:
                 cell_bounds = np.asarray([cell.bounds for cell in nonempty_cells])
-                plot_min = np.minimum(plot_min, cell_bounds[:, :2].min(axis = 0))
-                plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis = 0))
+                plot_min = np.minimum(plot_min, cell_bounds[:, :2].min(axis=0))
+                plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis=0))
         elif cells is not None:
-            raise TypeError(
-                "cells must be a scipy.spatial.Voronoi object, "
-                "a list of shapely.geometry.Polygon objects, or None"
-            )
+            raise TypeError("cells must be a Voronoi object, a list of polygons, or None")
+    if voronoi is not None and offset != num_nodes:
+        raise ValueError("Voronoi cells must correspond to the plotted nodes in order")
 
     if num_edges > 0:
         ax.add_collection(
@@ -347,38 +399,18 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
             zorder = _GRAPH_NODE_ZORDER,
         )
     else:
-        color_map = plt.get_cmap("tab10" if len(unique_labels) <= 10 else "tab20")
-        legend_handles = []
-
-        for color_index, class_id in enumerate(unique_labels):
-            class_nodes = labels == class_id
-            class_color = color_map(color_index % color_map.N)
-            class_name = (
-                names_labels[color_index]
-                if names_labels is not None
-                else str(class_id)
-            )
-            ax.scatter(
-                nodes[class_nodes, 0],
-                nodes[class_nodes, 1],
-                s = node_size,
-                facecolors = to_rgba(class_color, alpha = _GRAPH_NODE_FACE_ALPHA),
-                edgecolors = class_color,
-                zorder = _GRAPH_NODE_ZORDER,
-            )
-            legend_handles.append(
-                Line2D(
-                    [], [],
-                    marker = "o",
-                    linestyle = "none",
-                    markersize = _GRAPH_LEGEND_MARKER_SIZE,
-                    markerfacecolor = class_color,
-                    markeredgecolor = class_color,
-                    label = class_name,
-                )
-            )
-
-        ax.legend(handles = legend_handles, title = "Labels")
+        ax.scatter(nodes[:, 0], nodes[:, 1], s=node_size,
+                   facecolors=node_colors, edgecolors=node_colors,
+                   alpha=_GRAPH_NODE_FACE_ALPHA, zorder=_GRAPH_NODE_ZORDER)
+        # The legend shows pure categories, not every observed mixture.
+        legend_handles = [
+            Line2D([], [], marker="o", linestyle="none",
+                   markersize=_GRAPH_LEGEND_MARKER_SIZE,
+                   markerfacecolor=color, markeredgecolor=color,
+                   label=labels_names[k] if labels_names is not None else str(k))
+            for k, color in enumerate(pure_colors.numpy())
+        ]
+        ax.legend(handles=legend_handles, title="Labels")
 
     plot_title = title or f"n={num_nodes}, edges={num_edges}"
     ax.set_title(plot_title)
@@ -500,6 +532,8 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
                                                 yoff=float(offset[1])) for cell in cells])
             elif cells is not None:
                 raise TypeError("graph.cells must be a Voronoi object or a list of polygons")
+            else:
+                shifted_cells.append([Polygon() for _ in range(len(pos))])
 
     standalone = ax is None
     if standalone:
@@ -508,10 +542,10 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
         fig = ax.figure
 
     # Plot both sets together so that plot_positions fits the full layout.
-    labels = torch.cat([torch.full((len(pos),), index, dtype = torch.long)
+    labels = torch.cat([torch.eye(2)[index].expand(len(pos), -1)
                         for index, pos in enumerate(positions)])
     plot_positions(torch.cat(positions), ax = ax, title = title, labels = labels,
-                   node_size = node_size, names_labels = ["Graph 1", "Graph 2"],
+                   node_size = node_size, labels_names = ["Graph 1", "Graph 2"],
                    voronoi = tuple(shifted_cells) if voronoi else None)
     ax.get_legend().set_title("")
 
@@ -531,7 +565,8 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
 
 def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
                voronoi: bool = False, node_size: float | None = None,
-               names_labels: list[str] | None = None) -> None:
+               labels_names: list[str] | None = None,
+               palette: str | None = None) -> None:
     """Plot a graph using the spatial coordinates stored in ``graph.pos``.
 
     Parameters
@@ -551,9 +586,11 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
-    names_labels : list[str] | None, default = None
-        Optional names shown in the legend, ordered according to the sorted
-        unique values in ``graph.labels``.
+    palette : str | None, default = None
+        Shared categorical palette name; None uses the global default.
+    labels_names : list[str] | None, default = None
+        Optional K category names in column order of ``graph.labels``.
+        Labels must be a probability matrix [num_nodes, K].
 
     Returns
     -------
@@ -608,7 +645,8 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         labels = getattr(graph, "labels", None),
         voronoi = cells,
         node_size = node_size,
-        names_labels = names_labels,
+        labels_names = labels_names,
+        palette = palette,
     )
 
 
@@ -771,6 +809,8 @@ def plot_coupling_hungarian(
     figsize: tuple[float, float] | None = None,
     title: str = "Hungarian graph matching",
     node_size: float | None = None,
+    labels_names: list[str] | None = None,
+    palette: str | None = None,
 ) -> None:
     """Plot matched graph pairs in a grid, using a previously computed assignment.
 
@@ -804,6 +844,11 @@ def plot_coupling_hungarian(
         the matched batch indices; individual graph titles are omitted.
     node_size : float | None, default = None
         Node marker area passed to plot_nodes; None uses its automatic size.
+
+    labels_names : list[str] | None, default = None
+        Category names in column order, shared across all graphs.
+    palette : str | None, default = None
+        Shared categorical palette; None uses the global default.
 
     Returns:
     -------
@@ -856,7 +901,8 @@ def plot_coupling_hungarian(
         for column, graph in enumerate((batch_1[i], batch_2[j])):
             # A blank space suppresses plot_nodes' automatic node/edge title.
             plot_nodes(graph, title=" ",
-                       ax=axes[0, column], node_size=node_size, voronoi=voronoi)
+                       ax=axes[0, column], node_size=node_size, voronoi=voronoi,
+                       labels_names=labels_names, palette=palette)
             if show_adjacency:
                 # adjacency_matrix requires at least two nodes; a singleton's
                 # entry is determined directly by the presence of a self-loop.
@@ -883,7 +929,8 @@ def plot_coupling_hungarian(
 def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
                figsize: tuple[float, float] = (15, 7),
                voronoi: bool = False, node_size: float | None = None,
-               names_labels: list[str] | None = None) -> None:
+               labels_names: list[str] | None = None,
+               palette: str | None = None) -> None:
     """Plot a graph's adjacency matrix and spatial representation side by side.
 
     Parameters
@@ -902,9 +949,10 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
     node_size : float | None, default = None
         Node marker area in points squared. If None, use
         ``max(70, 1800.0 / num_nodes)``.
-    names_labels : list[str] | None, default = None
-        Optional names shown in the graph legend, ordered according to the
-        sorted unique values in ``graph.labels``.
+    palette : str | None, default = None
+        Shared categorical palette name; None uses the global default.
+    labels_names : list[str] | None, default = None
+        Optional K category names in column order of ``graph.labels``.
 
     Returns
     -------
@@ -942,7 +990,8 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         ax = axes[1],
         voronoi = voronoi,
         node_size = node_size,
-        names_labels = names_labels,
+        labels_names = labels_names,
+        palette = palette,
     )
 
     overall_title = title or f"n={graph.num_nodes}, edges={num_edges}"

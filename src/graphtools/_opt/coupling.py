@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 
 from ..validity import _graph_device, _floating_dtype
 from ..utils.preprocessing import prepare_batches
+from ..utils.measures import state_distance
 
 
 @torch.no_grad()
@@ -15,6 +16,7 @@ def hungarian_coupling(
     batch_2: Sequence[Data],
     alpha: float = 0.5,
     *,
+    feature_type: str = "continuous",
     device: torch.device | str | None = None,
     pair_batch_size: int = 32,
     reg: float = 0.01,
@@ -50,10 +52,16 @@ def hungarian_coupling(
         and node masses are uniform. Graph-level masses are always 1/K.
         Input graphs and their tensors are not modified.
     alpha : float, default = 0.5
-        Structural weight in [0, 1]. At 0, only squared Euclidean distances
+        Structural weight in [0, 1]. At 0, only the selected feature costs
         between node features with uniform node masses contribute;
         at 1, only structure contributes
         and node features are not required.
+    feature_type : str, default = "continuous"
+        Node feature cost: "continuous" uses squared Euclidean distance,
+        "soft" uses Jensen-Shannon divergence in base 2, and "hard" uses
+        one-hot agreement (1 for equal categories, 0 otherwise). Soft and
+        hard features must share the same category ordering across graphs.
+        Ignored when alpha = 1.
     device : torch.device | str | None, default = None
         Device for FGW computation and all returned tensors. If None, follow
         batch_1[0].edge_index (CPU if absent). Linear assignment runs on
@@ -153,7 +161,8 @@ def hungarian_coupling(
                     stop = min(start + pair_batch_size, count_1 * count_2)
                     pairs = torch.arange(start, stop, device=device)
                     i, j = pairs // count_2, pairs % count_2
-                    M = (torch.cdist(x1[i], x2[j]).square() if alpha < 1
+                    # Compute node costs independently for each pair in the chunk.
+                    M = (state_distance(x1[i], x2[j], feature_type=feature_type) if alpha < 1
                          else C1.new_zeros((stop - start, C1.shape[1], C2.shape[1])))
                     result = ot.batch.solve_gromov_batch(
                         Ca=C1[i], Cb=C2[j], a=h1[i], b=h2[j], M=M,

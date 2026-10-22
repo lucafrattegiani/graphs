@@ -1,9 +1,6 @@
 #Mathematics and ML
 import torch
-from torch_geometric.data import Data
-
-#Clustering
-from .._metrics.spectral import spectral_clustering
+from ..validity import _validate_size
 
 #Polygonal structure
 def polygonal(n: int, device: torch.device | str = "cpu", radius: float = 1.0, translation: tuple[float, float] = (0.0, 0.0)) -> torch.Tensor:
@@ -156,73 +153,70 @@ def circle(n: int, device: torch.device | str = "cpu", translation: tuple[float,
 
     return positions
 
-#Spectral bubble communities
-def bubbles(n: int, device: torch.device | str = "cpu", radius: float = 0.2,
-            K: int | None = None, graph: Data | None = None) -> torch.Tensor:
+#Spatial bubble communities
+def bubbles(n: int, device: torch.device | str = "cpu", radius_bubble: float = 0.2, radius_polygon: float = 1.0,
+            K: int | None = None, communities: torch.Tensor | None = None) -> torch.Tensor:
     """
-    Generate node positions in bubbles determined by spectral clustering.
-
-    Each distinct label gets a bubble, including the special labels -1 and -2.
-    These bubbles only group nodes for display; they do not reclassify them.
-    Offsets are sampled uniformly in a disk for all nodes at once. The sampling
-    distribution is unchanged, but seeded coordinates can differ from sampling
-    each community separately.
+    Generate node positions in circular bubbles, without requiring a graph.
 
     Parameters
     ----------
     n : int
-        Number of spatial coordinates to generate.
+        Positive number of positions to generate.
     device : torch.device | str, default = "cpu"
-        Device on which to create the tensor.
-    radius : float, default = 0.2
-        Radius of each circular community.
+        Device on which to generate positions.
+    radius_bubble : float, default = 0.2
+        Nonnegative radius of each bubble. Offsets are uniform over its disk.
     K : int | None, default = None
-        Number of communities. If None, it is determined automatically from
-        the maximum eigengap of the normalized adjacency matrix.
-    graph : torch_geometric.data.Data | None, default = None
-        Graph whose connectivity is used for spectral clustering.
+        Required number of bubbles when communities is absent, with 1 <= K <= n.
+        Nodes are randomly assigned to balanced groups: n // K per bubble,
+        with one extra node in the first n % K bubbles. Ignored when explicit
+        communities are supplied; their distinct labels define the bubbles.
+    communities : torch.Tensor | None, default = None
+        Integer assignments of shape (n,). Nodes with the same label share a
+        bubble. Labels may be negative or nonconsecutive; sorted unique labels
+        map to successive polygon centers. The input tensor is not modified.
 
     Returns
     -------
     torch.Tensor
-        Spatial coordinates with shape ``[n, 2]``, aligned with the original
-        node ordering.
-
-    Raises
-    ------
-    TypeError
-        If ``graph`` is not a ``torch_geometric.data.Data`` object.
-    ValueError
-        If the number of graph nodes differs from ``n`` or ``K`` is invalid.
+        Coordinates of shape (n, 2), preserving original node order. A single
+        bubble is centered at the origin; multiple centers form a regular
+        polygon of radius one. No clustering or graph construction is done.
     """
-    if not isinstance(graph, Data):
-        raise TypeError("graph must be a torch_geometric.data.Data object")
-    if graph.num_nodes != n:
-        raise ValueError("graph.num_nodes must be equal to n")
+    _validate_size(n, "n")
+    if not 0 <= radius_bubble < float("inf"):
+        raise ValueError("radius_bubble must be finite and nonnegative")
+    if not 0 <= radius_polygon < float("inf"):
+        raise ValueError("radius_polygon must be finite and nonnegative")
 
-    # 1. Assign a label to each node, preserving the original node order.
-    assignments = spectral_clustering(
-        graph,
-        device = device,
-        K = K,
-    )
-    # 2. Map labels to consecutive center indices. Negative or non-consecutive
-    # labels are valid: node_centers[i] identifies the center for node i.
-    communities, node_centers = torch.unique(assignments, sorted = True, return_inverse = True)
-    num_communities = communities.numel()
-
-    # 3. Place a single bubble at the origin, or multiple bubbles on a polygon.
-    if num_communities == 1:
-        centers = torch.zeros((1, 2), device = device) #The unique center is at the origin
+    if communities is None:
+        _validate_size(K, "K")
+        if K > n:
+            raise ValueError("K must not exceed n")
+        # Balanced memberships, shuffled across node indices rather than
+        # assigning consecutive blocks of nodes to the same bubble.
+        node_centers = (torch.arange(n, device=device) % K)[torch.randperm(n, device=device)]
+        num_communities = K
     else:
-        centers = polygonal(num_communities, device) #Centers are vertices of a regular polygon
+        if not isinstance(communities, torch.Tensor):
+            raise TypeError("communities must be an integer tensor")
+        if communities.shape != (n,):
+            raise ValueError("communities must have shape (n,)")
+        if communities.dtype == torch.bool or communities.is_floating_point() or communities.is_complex():
+            raise TypeError("communities must contain integer labels")
+        # Preserve membership and original node order, including special labels.
+        labels, node_centers = torch.unique(communities.to(device=device), sorted=True,
+                                           return_inverse=True)
+        num_communities = labels.numel()
 
-    # 4. Sample all offsets in one call, then translate each by its own center.
-    # circle uses radius * sqrt(U), which gives uniform area density in the disk.
-    offsets = circle(n, device = device, radius = radius)
-    positions = centers[node_centers] + offsets
-
-    return positions
+    # Place the centers, then sample and translate all node offsets together.
+    if num_communities == 1:
+        centers = torch.zeros((1, 2), device=device)
+    else:
+        centers = polygonal(num_communities, device=device, radius=radius_polygon)
+    offsets = circle(n, device=device, radius=radius_bubble)
+    return centers[node_centers] + offsets
 
 #Noisy polygonal structure
 def ring(n: int, device: torch.device | str = "cpu", mode: str = "polygonal", amplitude: float = 1.0, elongation: float = 2.0, orientation: float = 1.0, translation: tuple[float, float] = (0.0, 0.0), radius: float = 1.0, noise_scale: float = 0.05, lim_inf: float = -1.0, lim_sup: float = 1.0) -> torch.Tensor:
@@ -343,7 +337,7 @@ def sample_positions(n: int, position_type: str, device: torch.device | str = "c
     --------
     ``sample_positions(100, "ring", noise_scale = 0.1)``
 
-    ``sample_positions(100, "bubbles", graph = graph, K = 4, radius = 0.15)``
+    ``sample_positions(100, "bubbles", K = 4, radius = 0.15)``
     """
     if not isinstance(n, int) or isinstance(n, bool):
         raise TypeError("n must be an integer")

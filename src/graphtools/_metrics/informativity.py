@@ -25,7 +25,7 @@ def jsd_informativeness(graph: Data, device: torch.device | str | None = None, a
         graph is not modified. Floating feature precision is preserved.
     aggregate : bool
         Whether to aggregate the Jensen-Shannon to get a graph-level measure.
-    attribute_type : str
+    attributes_type : str
         Type of node attributes {"hard", "soft"}.
     level : str
         Level at which to compute the informativity {"node", "class"}.

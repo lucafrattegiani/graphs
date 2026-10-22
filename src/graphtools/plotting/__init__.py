@@ -1,5 +1,7 @@
 """Plotting utilities for graph data and spatial structures."""
 
+from .colors import set_colors, color_labels
+
 from .plotting import (
     plot_coupling_fgw,
     plot_coupling_hungarian,
@@ -15,6 +17,8 @@ from .plotting import (
 )
 
 __all__ = [
+    "set_colors",
+    "color_labels",
     "plot_coupling_fgw",
     "plot_coupling_hungarian",
     "plot_elbow",

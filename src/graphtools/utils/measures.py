@@ -1,4 +1,6 @@
 #Torch data and computations
+from math import log
+
 import torch
 from ..validity import _floating_dtype
 
@@ -162,3 +164,129 @@ def gaussian_hellinger_distance(mu_i: torch.Tensor, sigma_i: torch.Tensor, mu: t
 
     bhattacharyya_coefficient = torch.exp(log_bc.clamp(max = 0.0))
     return (1.0 - bhattacharyya_coefficient).clamp(min = 0.0, max = 1.0)
+
+
+#--------------------------------------------------
+#PAIRWISE NODE STATE COSTS
+#--------------------------------------------------
+
+def continuous_state_distance(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes squared Euclidean distances between all pairs of rows.
+
+    Parameters:
+    ----------
+    x, y : torch.Tensor
+        Floating matrices with shapes [n, d] and [m, d], on the same device
+        and with the same dtype.
+
+    A leading batch dimension B is also supported: inputs [B, n, d] and
+    [B, m, d] produce [B, n, m], comparing nodes within each batch pair.
+
+    Returns:
+    -------
+    torch.Tensor
+        Squared distance matrix with shape [n, m], on the input device.
+    """
+    return torch.cdist(x, y, p=2).square()
+
+
+def soft_state_distance(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes pairwise Jensen-Shannon divergence in base 2.
+
+    Parameters:
+    ----------
+    x, y : torch.Tensor
+        Floating probability matrices with shapes [n, d] and [m, d], on the
+        same device and with the same dtype. Rows must be finite, nonnegative
+        and sum to one; columns must represent the same categories.
+
+    A leading batch dimension B is also supported: inputs [B, n, d] and
+    [B, m, d] produce [B, n, m], comparing nodes within each batch pair.
+
+    Returns:
+    -------
+    torch.Tensor
+        Divergence matrix with shape [n, m], on the input device. Values lie
+        in [0, 1]; this is the squared Jensen-Shannon distance, without a root.
+    """
+    for probabilities in (x, y):
+        if (probabilities.ndim not in (2, 3) or not torch.isfinite(probabilities).all()
+                or (probabilities < 0).any()
+                or not torch.allclose(probabilities.sum(dim=-1),
+                                      probabilities.new_ones(probabilities.shape[:-1]))):
+            raise ValueError("Soft features must be finite nonnegative probability rows summing to one.")
+    if x.shape[-1] != y.shape[-1]:
+        raise ValueError("Soft features must have the same number of categories.")
+
+    # Compute each row's entropy once. xlogy handles zero probabilities exactly.
+    entropy_x = -torch.special.xlogy(x, x).sum(dim=-1)
+    entropy_y = -torch.special.xlogy(y, y).sum(dim=-1)
+    mixture = (x[..., :, None, :] + y[..., None, :, :]) * 0.5
+    entropy_mixture = -torch.special.xlogy(mixture, mixture).sum(dim=-1)
+    divergence = (entropy_mixture - 0.5 * (entropy_x[..., :, None] + entropy_y[..., None, :])) / log(2)
+    return divergence.clamp_min(0) # Remove negative floating-point roundoff.
+
+
+def hard_state_distance(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes pairwise category agreement between one-hot rows.
+
+    Parameters:
+    ----------
+    x, y : torch.Tensor
+        One-hot matrices with shapes [n, d] and [m, d], on the same device
+        and with the same dtype. Columns must represent the same categories.
+
+    A leading batch dimension B is also supported: inputs [B, n, d] and
+    [B, m, d] produce [B, n, m], comparing nodes within each batch pair.
+
+    Returns:
+    -------
+    torch.Tensor
+        Agreement matrix with shape [n, m], on the input device: 1 for equal
+        categories, 0 otherwise. This is a similarity, not a dissimilarity;
+        minimizing it as a transport cost favors different categories.
+    """
+    for assignments in (x, y):
+        if (assignments.ndim not in (2, 3) or not ((assignments == 0) | (assignments == 1)).all()
+                or not (assignments.sum(dim=-1) == 1).all()):
+            raise ValueError("Hard features must contain one-hot rows.")
+    if x.shape[-1] != y.shape[-1]:
+        raise ValueError("Hard features must have the same number of categories.")
+
+    # One-hot dot products are 1 exactly when the selected categories agree.
+    return x @ y.transpose(-2, -1)
+
+
+def state_distance(x: torch.Tensor, y: torch.Tensor,
+                   feature_type: str = "continuous") -> torch.Tensor:
+    """
+    Selects the pairwise state cost according to the feature type.
+
+    Parameters:
+    ----------
+    x, y : torch.Tensor
+        Matrices with shapes [n, d] and [m, d], on the same device and with
+        the same dtype. See the selected function for input requirements.
+    feature_type : str, default = "continuous"
+        "continuous": squared Euclidean distance; "soft": Jensen-Shannon
+        divergence in base 2; "hard": one-hot category agreement.
+
+    A leading batch dimension B is also supported: inputs [B, n, d] and
+    [B, m, d] produce [B, n, m], comparing nodes within each batch pair.
+
+    Returns:
+    -------
+    torch.Tensor
+        Pairwise cost matrix with shape [n, m], on the input device.
+    """
+    functions = {
+        "continuous": continuous_state_distance,
+        "soft": soft_state_distance,
+        "hard": hard_state_distance,
+    }
+    if feature_type not in functions:
+        raise ValueError('feature_type must be "continuous", "soft" or "hard".')
+    return functions[feature_type](x, y)

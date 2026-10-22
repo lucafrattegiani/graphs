@@ -57,27 +57,24 @@ def test_jaccard_torch_matches_neighborhood_counting(device, sparse, case):
 
 
 @pytest.mark.parametrize("device", DEVICES)
-def test_bubbles_preserves_label_mapping(monkeypatch, device):
+def test_bubbles_preserves_label_mapping(device):
     """Interleaved and special labels map to the correct centers in node order."""
     from graphtools.sampling import positions
 
     assignments = torch.tensor([7, -1, 2, -2, 7, 2], device=device)
-    monkeypatch.setattr(positions, "spectral_clustering", lambda *args, **kwargs: assignments)
-    graph = Data(num_nodes=6, edge_index=torch.empty((2, 0), dtype=torch.long))
-    result = positions.bubbles(6, graph=graph, device=device, radius=0)
+    result = positions.bubbles(6, communities=assignments, device=device, radius=0)
     centers = positions.polygonal(4, device=device)
     torch.testing.assert_close(result, centers[torch.tensor([3, 1, 2, 0, 3, 2], device=device)])
 
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("labels", [[0, 0, 0, 0], [0, 1, 2, 3]])
-def test_bubbles_offsets_stay_in_disk(monkeypatch, device, labels):
+def test_bubbles_offsets_stay_in_disk(device, labels):
     """Single and multiple bubbles return finite positions within the given radius."""
     from graphtools.sampling import positions
 
     assignments = torch.tensor(labels, device=device)
-    monkeypatch.setattr(positions, "spectral_clustering", lambda *args, **kwargs: assignments)
-    result = positions.bubbles(4, graph=example_graph(), device=device, radius=.2)
+    result = positions.bubbles(4, communities=assignments, device=device, radius=.2)
     centers = (torch.zeros((4, 2), device=device) if labels[0] == labels[-1]
                else positions.polygonal(4, device=device))
     assert result.shape == (4, 2)
@@ -575,3 +572,121 @@ def test_prepare_batches_groups_by_support():
     assert groups[2]["num_nodes"] == [4, 2]
     assert groups[2]["C"].shape == (2, 2, 2)
     assert (groups[2]["h"] > 0).all()
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("n,K", [(12, 3), (10, 3), (4, 1), (4, 4)])
+def test_bubbles_random_balanced_groups(device, n, K):
+    """Random memberships occupy every bubble and differ in size by at most one."""
+    from graphtools import graphon
+    result = graphon.sample_positions(n, "bubbles", K=K, radius=0, device=device)
+    centers = (torch.zeros((1, 2), device=device) if K == 1
+               else graphon.polygonal(K, device=device))
+    membership = torch.cdist(result, centers).argmin(1)
+    counts = torch.bincount(membership, minlength=K)
+    expected = torch.full((K,), n // K, device=device)
+    expected[:n % K] += 1
+    torch.testing.assert_close(counts, expected)
+    torch.testing.assert_close(result, centers[membership])
+
+
+def test_sample_graph_bubbles_uses_external_or_computed_communities(monkeypatch):
+    """Only sample_graph computes communities, and explicit labels bypass clustering."""
+    from graphtools import graphon
+    labels = torch.tensor([1, 0, 1, 0])
+    calls = []
+    def cluster(graph, **kwargs):
+        calls.append(graph)
+        return labels
+    monkeypatch.setattr(graphon, "spectral_clustering", cluster)
+    automatic = graphon.sample_graph(4, positions="bubbles", position_kwargs={"radius": 0})
+    explicit = graphon.sample_graph(4, positions="bubbles",
+                                    position_kwargs={"communities": labels, "radius": 0})
+    assert len(calls) == 1
+    expected = graphon.polygonal(2)[labels]
+    torch.testing.assert_close(automatic.pos, expected)
+    torch.testing.assert_close(explicit.pos, expected)
+    torch.testing.assert_close(labels, torch.tensor([1, 0, 1, 0]))
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_fgw_soft_cost_matrix_matches_jsd(monkeypatch, dtype):
+    """All soft node-pair costs match JS divergence, including zero categories."""
+    import ot
+    from scipy.spatial.distance import jensenshannon
+    p = torch.tensor([[1., 0., 0.], [.5, .5, 0.]], dtype=dtype)
+    q = torch.tensor([[0., 1., 0.], [1., 0., 0.], [.2, .8, 0.]], dtype=dtype)
+    expected = torch.tensor([[jensenshannon(a, b, base=2)**2
+                              for b in q.double().numpy()] for a in p.double().numpy()], dtype=dtype)
+    solve = ot.gromov.fused_gromov_wasserstein2
+    def check_cost(*args, **kwargs):
+        torch.testing.assert_close(kwargs["M"], expected, atol=1e-6, rtol=1e-5)
+        return solve(*args, **kwargs)
+    monkeypatch.setattr(ot.gromov, "fused_gromov_wasserstein2", check_cost)
+    first = Data(num_nodes=2, x=p, C=torch.zeros(2, 2, dtype=dtype))
+    second = Data(num_nodes=3, x=q, C=torch.zeros(3, 3, dtype=dtype))
+    loss, info = opt.fused_gromov_wasserstein_distance(first, second, alpha=0, feature_type="soft")
+    assert torch.isfinite(loss)
+    torch.testing.assert_close(loss, (expected * info["T"]).sum())
+
+
+@pytest.mark.parametrize("values", [[-.1, 1.1], [0., 0.], [.2, .2], [float("nan"), 1.]])
+def test_fgw_soft_rejects_invalid_probabilities(values):
+    """Soft costs reject invalid distributions instead of silently changing them."""
+    graph = Data(num_nodes=1, x=torch.tensor([values]), C=torch.zeros(1, 1))
+    with pytest.raises(ValueError, match="probability"):
+        opt.fused_gromov_wasserstein_distance(graph, graph, feature_type="soft")
+
+
+@pytest.mark.parametrize("feature_type, expected", [
+    ("continuous", [[2., 0., 2.], [0., 2., 2.]]),
+    ("soft", [[1., 0., 1.], [0., 1., 1.]]),
+    ("hard", [[0., 1., 0.], [1., 0., 0.]]),
+])
+def test_state_distance_pairwise_costs(feature_type, expected):
+    """Each state cost compares all row pairs with its documented convention."""
+    from graphtools.utils import measures
+    x = torch.tensor([[1., 0., 0.], [0., 1., 0.]])
+    y = torch.tensor([[0., 1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    expected = torch.tensor(expected)
+    direct = getattr(measures, f"{feature_type}_state_distance")
+    torch.testing.assert_close(direct(x, y), expected)
+    torch.testing.assert_close(measures.state_distance(x, y, feature_type), expected)
+
+
+@pytest.mark.parametrize("feature_type", ["continuous", "soft", "hard"])
+@pytest.mark.parametrize("alpha", [0., .5, 1.])
+def test_hungarian_state_costs(monkeypatch, feature_type, alpha):
+    """Chunks pass the selected node costs to POT and preserve graph-pair order."""
+    import ot
+    from graphtools.utils.measures import state_distance
+    first = [Data(x=torch.tensor([[1., 0.], [0., 1.]]), C=torch.zeros(2, 2)),
+             Data(x=torch.tensor([[0., 1.], [0., 1.]]), C=torch.zeros(2, 2))]
+    second = [Data(x=torch.tensor([[0., 1.], [1., 0.], [1., 0.]]), C=torch.zeros(3, 3)),
+              Data(x=torch.tensor([[1., 0.], [1., 0.], [1., 0.]]), C=torch.zeros(3, 3))]
+    if feature_type == "soft":
+        for graph in first + second:
+            graph.x = .8 * graph.x + .1
+    expected = torch.stack([state_distance(a.x, b.x, feature_type)
+                            for a in first for b in second])
+    if alpha == 1:
+        expected.zero_()
+        for graph in first + second:
+            graph.num_nodes = graph.x.shape[0]
+            graph.x = None # Structural-only solves must not access features.
+    solve = ot.batch.solve_gromov_batch
+    seen = 0
+    def check_cost(*args, **kwargs):
+        nonlocal seen
+        size = kwargs["M"].shape[0]
+        torch.testing.assert_close(kwargs["M"], expected[seen:seen + size])
+        seen += size
+        return solve(*args, **kwargs)
+    monkeypatch.setattr(ot.batch, "solve_gromov_batch", check_cost)
+    W, info = opt.hungarian_coupling(first, second, alpha=alpha,
+                                    feature_type=feature_type, pair_batch_size=3,
+                                    reg=.1, verbose=False)
+    assert seen == 4
+    assert torch.isfinite(info["C"]).all()
+    torch.testing.assert_close(W.sum(0), torch.full((2,), .5))
+    torch.testing.assert_close(W.sum(1), torch.full((2,), .5))

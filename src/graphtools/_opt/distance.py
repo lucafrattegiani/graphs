@@ -4,18 +4,19 @@ import ot
 from torch_geometric.data import Data
 
 from ..utils.matrices import adjacency_matrix, laplacian_matrix, inverse_shortest_path_matrix, jaccard_similarity_matrix
+from ..utils.measures import state_distance
 from ..validity import _graph_device, _floating_dtype
 
 def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float = 0.5,
-                                     structure: str = "adjacency", *,
+                                     structure: str = "adjacency", feature_type: str = "continuous", *,
                                      device: torch.device | str | None = None) -> tuple[torch.Tensor, dict]:
     """
     Computes the 2-Fused Gromov-Wasserstein distance between two graphs:
 
-    FGW = min_T (1 - alpha) * sum_ij M_ij^2 T_ij
+    FGW = min_T (1 - alpha) * sum_ij M_ij T_ij
           + alpha * sum_ijkl (C1_ik - C2_jl)^2 T_ij T_kl
 
-    M_ij -> Distance between i-th feature of graph_1 and j-th feature of graph_2.
+    M_ij -> Feature distance between nodes i and j.
     T -> Coupling matrix between nodes of graph_1 and graph_2.
     C_1, C_2 -> Structural similarity matrices of graph_1 and graph_2, respectively
 
@@ -29,6 +30,8 @@ def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float
         only structure contributes.
     structure : str, default = "adjacency"
         Matrix used when ``graph.C`` is absent or None. One of {"adjacency", "laplacian", "shortest_path", "jaccard"}.
+    feature_type : str, default = "continuous"
+        Type of node features. One of {"continuous", "soft", "hard"}.
     device : torch.device | str | None
         Output device for the loss and all tensors in info. If None, follow
         graph_1.edge_index (CPU if absent). Preparation and POT's solver run
@@ -52,10 +55,10 @@ def fused_gromov_wasserstein_distance(graph_1: Data, graph_2: Data, alpha: float
         inputs.extend((getattr(graph, "h", None), getattr(graph, "C", None)))
     dtype = _floating_dtype(*inputs)
 
-    # Extract node feature costs (squared Euclidean distance)
+    # Extract pairwise node feature costs
     if alpha < 1:
         features = [graph.x.to(device = device, dtype = dtype) for graph in graphs]
-        M = torch.cdist(features[0], features[1], p = 2).square()
+        M = state_distance(features[0], features[1], feature_type=feature_type)
     else:
         M = torch.zeros((graph_1.num_nodes, graph_2.num_nodes), dtype = dtype, device = device)
 

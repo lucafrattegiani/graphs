@@ -1,6 +1,7 @@
 #Mathematics and ML
 import torch
 from torch_geometric.data import Data
+from ._metrics.spectral import spectral_clustering
 
 #--------------------------------------------------
 #GRAPH SAMPLING
@@ -40,7 +41,9 @@ def sample_graph(n: int, device: torch.device | str = "cpu",
     state_kwargs : dict | None, default = None
         Additional arguments passed to ``sample_states``.
     position_kwargs : dict | None, default = None
-        Additional arguments passed to ``sample_positions``.
+        Additional arguments passed to ``sample_positions``. For bubbles,
+        explicit communities are respected; otherwise spectral clustering of
+        the sampled graph supplies them, optionally using the requested K.
 
     Returns
     -------
@@ -82,8 +85,11 @@ def sample_graph(n: int, device: torch.device | str = "cpu",
 
     if positions is not None:
         position_parameters = position_kwargs.copy()
-        if positions == "bubbles":
-            position_parameters["graph"] = graph
+        if positions == "bubbles" and position_parameters.get("communities") is None:
+            # Keep graph-based layouts here; bubbles itself only uses labels.
+            position_parameters["communities"] = spectral_clustering(
+                graph, device=device, K=position_parameters.get("K")
+            )
 
         graph.pos = sample_positions(
             n = n,
