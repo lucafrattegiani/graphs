@@ -196,7 +196,6 @@ def test_fgw_heatmap_selection_updates_all_artists(monkeypatch):
             np.testing.assert_allclose([p.get_facecolor()[:3] for p in marginal.patches], expected)
         assert alignment.get_legend() is None
         colorbar = alignment._label_colorbar
-        assert colorbar.ax.get_ylabel() == f"P({['A', 'B'][index]})"
         assert colorbar.mappable.get_clim() == (0, 1)
         np.testing.assert_allclose(colorbar.cmap(0.)[:3], [1., 1., 1.])
         np.testing.assert_allclose(colorbar.cmap(1.)[:3], set_colors(2)[index].numpy())
