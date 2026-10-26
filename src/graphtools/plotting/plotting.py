@@ -20,10 +20,12 @@ from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from ..utils.matrices import adjacency_matrix
 from .colors import set_colors, color_labels
+from .interactive import bind_colors, category_colorbar, show_figure
 
-_VORONOI_FACE_ALPHA = 0.3
-_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = _VORONOI_FACE_ALPHA)
-_VORONOI_EDGE_COLOR = to_rgba("tab:blue", alpha = 0.8)
+_VORONOI_FACE_ALPHA = 1.0
+# Unlabelled cells retain their original light-blue translucent fill.
+_VORONOI_FACE_COLOR = to_rgba("lightsteelblue", alpha = 0.3)
+_VORONOI_EDGE_COLOR = to_rgba("black", alpha = 0.8)
 _VORONOI_EDGE_ALPHA = 0.8
 _VORONOI_EDGE_WIDTH = 1.0
 _GRAPH_EDGE_COLOR = "black"
@@ -117,7 +119,7 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
         Axes on which to draw. If None, a new figure is created and displayed.
 
     colors : numpy.ndarray | None, default = None
-        RGB colors [n, 3] in generating-node order. Cells use a translucent fill.
+        RGB colors [n, 3] in generating-node order. Cells use the same opaque fill as their nodes.
 
     Returns
     -------
@@ -146,11 +148,12 @@ def plot_voronoi(voronoi: Voronoi, title: str = "Voronoi tessellation",
             lower, upper = voronoi.points.min(0), voronoi.points.max(0)
             padding = 0.1 * max(float((upper - lower).max()), 1.0)
             bounds = (lower - padding, upper + padding)
-        for coordinates, color in zip(_bounded_voronoi_cells(voronoi, *bounds), colors):
+        for index, (coordinates, color) in enumerate(zip(_bounded_voronoi_cells(voronoi, *bounds), colors)):
             if len(coordinates) >= 3:
-                ax.fill(coordinates[:, 0], coordinates[:, 1],
+                patch, = ax.fill(coordinates[:, 0], coordinates[:, 1],
                         facecolor=to_rgba(color, _VORONOI_FACE_ALPHA),
                         edgecolor="none", zorder=0)
+                patch._label_node_index = index
 
     voronoi_plot_2d(
         voronoi,
@@ -191,7 +194,7 @@ def plot_epsilon_voronoi(cells: list[Polygon],
         Axes on which to draw. If None, a new figure is created and displayed.
 
     colors : numpy.ndarray | None, default = None
-        RGB colors [n, 3] in generating-node order. Cells use a translucent fill.
+        RGB colors [n, 3] in generating-node order. Cells use the same opaque fill as their nodes.
 
     Returns
     -------
@@ -219,7 +222,7 @@ def plot_epsilon_voronoi(cells: list[Polygon],
             continue
 
         coordinates = np.asarray(cell.exterior.coords)
-        ax.fill(
+        patch, = ax.fill(
             coordinates[:, 0],
             coordinates[:, 1],
             facecolor = (_VORONOI_FACE_COLOR if colors is None
@@ -227,6 +230,8 @@ def plot_epsilon_voronoi(cells: list[Polygon],
             edgecolor = _VORONOI_EDGE_COLOR,
             linewidth = _VORONOI_EDGE_WIDTH,
         )
+
+        patch._label_node_index = index
 
     ax.set_title(title)
     ax.set_aspect("equal", adjustable = "box")
@@ -244,8 +249,10 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                    voronoi: Voronoi | list[Polygon] | tuple[Voronoi | list[Polygon], ...] | None = None,
                    node_size: float | None = None,
                    labels_names: list[str] | None = None,
-               palette: str | None = None) -> None:
-    """Plot two-dimensional positions with translucent fills and opaque borders.
+                   palette: str | None = None,
+                   mode: str = "standard", label_index: int = 0,
+                   show_legend: bool = True) -> None:
+    """Plot positions with entropy-shaded category colors and black node borders.
 
     Parameters
     ----------
@@ -276,6 +283,17 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     labels_names : list[str] | None, default = None
         Optional K category names in column order; defaults to 0, ..., K-1.
 
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
+
     Returns
     -------
     None
@@ -298,7 +316,7 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
         if not isinstance(labels, torch.Tensor) or labels.ndim != 2 or labels.shape[0] != num_nodes:
             raise ValueError("labels must have shape [num_nodes, K]")
         pure_colors = set_colors(labels.shape[1], palette)
-        node_colors = color_labels(labels, pure_colors).detach().cpu().numpy()
+        node_colors = color_labels(labels, pure_colors, mode=mode, label_index=label_index).detach().cpu().numpy()
     if labels_names is not None:
         if pure_colors is None or len(labels_names) != len(pure_colors):
             raise ValueError("labels_names must contain one name per category")
@@ -358,10 +376,13 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
 
     tessellations = voronoi if isinstance(voronoi, tuple) else (voronoi,)
     offset = 0
+    cell_artists = []
     for cells in tessellations:
         # Empty polygons preserve node indexing when an aligned graph has no cells.
         count = len(cells.points) if isinstance(cells, Voronoi) else len(cells) if isinstance(cells, list) else 0
         cell_colors = None if node_colors is None else node_colors[offset:offset + count]
+        start_index = offset
+        previous_patches = len(ax.patches)
         offset += count
         if isinstance(cells, Voronoi):
             plot_voronoi(cells, title=title, ax=ax, colors=cell_colors,
@@ -375,6 +396,9 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
                 plot_max = np.maximum(plot_max, cell_bounds[:, 2:].max(axis=0))
         elif cells is not None:
             raise TypeError("cells must be a Voronoi object, a list of polygons, or None")
+        for patch in list(ax.patches)[previous_patches:]:
+            if hasattr(patch, "_label_node_index"):
+                cell_artists.append((patch, start_index + patch._label_node_index))
     if voronoi is not None and offset != num_nodes:
         raise ValueError("Voronoi cells must correspond to the plotted nodes in order")
 
@@ -395,22 +419,35 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
             nodes[:, 1],
             s = node_size,
             facecolors = to_rgba(_GRAPH_NODE_COLOR, alpha = _GRAPH_NODE_FACE_ALPHA),
-            edgecolors = _GRAPH_NODE_COLOR,
+            edgecolors = "black",
             zorder = _GRAPH_NODE_ZORDER,
         )
     else:
-        ax.scatter(nodes[:, 0], nodes[:, 1], s=node_size,
-                   facecolors=node_colors, edgecolors=node_colors,
+        node_artist = ax.scatter(nodes[:, 0], nodes[:, 1], s=node_size,
+                   facecolors=node_colors, edgecolors="black",
                    alpha=_GRAPH_NODE_FACE_ALPHA, zorder=_GRAPH_NODE_ZORDER)
-        # The legend shows pure categories, not every observed mixture.
-        legend_handles = [
-            Line2D([], [], marker="o", linestyle="none",
-                   markersize=_GRAPH_LEGEND_MARKER_SIZE,
-                   markerfacecolor=color, markeredgecolor=color,
-                   label=labels_names[k] if labels_names is not None else str(k))
-            for k, color in enumerate(pure_colors.numpy())
-        ]
-        ax.legend(handles=legend_handles, title="Labels")
+        if show_legend and mode == "standard":
+            # The legend shows pure categories, not every uncertainty shade.
+            legend_handles = [
+                Line2D([], [], marker="o", linestyle="none",
+                       markersize=_GRAPH_LEGEND_MARKER_SIZE,
+                       markerfacecolor=color, markeredgecolor="black",
+                       label=labels_names[k] if labels_names is not None else str(k))
+                for k, color in enumerate(pure_colors.numpy())
+            ]
+            # Keep the legend outside the spatial plot, including in subplots.
+            ax.legend(handles=legend_handles, title="Labels", loc="center left",
+                      bbox_to_anchor=(1.04, 0.5), borderaxespad=0)
+
+    if labels is not None and mode == "heatmap":
+        def update_colors(rgb, selected):
+            node_artist.set_facecolors(rgb)
+            for patch, node_index in cell_artists:
+                patch.set_facecolor(rgb[node_index])
+            name = labels_names[selected] if labels_names is not None else str(selected)
+            if show_legend:
+                category_colorbar(ax, pure_colors[selected].numpy(), name)
+        bind_colors(fig, labels, pure_colors, labels_names, label_index, update_colors)
 
     plot_title = title or f"n={num_nodes}, edges={num_edges}"
     ax.set_title(plot_title)
@@ -420,13 +457,17 @@ def plot_positions(positions: torch.Tensor, edge_index: torch.Tensor | None = No
     ax.axis("off")
     if standalone:
         fig.tight_layout()
-        plt.show()
+        show_figure(fig)
 
 
 def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
                         title: str = "Node alignment", figsize: tuple[float, float] = (12, 6),
                         ax: Axes | None = None, node_size: float | None = None,
-                        linewidth: float = 2.0, voronoi: bool = False) -> None:
+                        linewidth: float = 2.0, voronoi: bool = False,
+                        labels_names: list[str] | None = None,
+                        palette: str | None = None,
+                        mode: str = "standard", label_index: int = 0,
+                        show_legend: bool = True) -> None:
     """Plot two graphs' node positions and the coupling between their nodes.
 
     Parameters
@@ -458,6 +499,26 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
         Draw graph.cells when present. Standard Voronoi objects and polygon
         lists are translated with the node positions on local copies.
         Missing cells are skipped; no tessellation is computed here.
+
+    labels_names : list[str] | None, default = None
+        Shared category names in column order of graph.labels, otherwise
+        numeric labels are used. Labels are optional probability matrices
+        [num_nodes, K]; both graphs must use the same categories when provided.
+        Unlabelled graphs retain default colors. The legend shows categories,
+        not graph identities.
+    palette : str | None, default = None
+        Shared categorical palette, passed to plot_positions.
+
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
 
     Returns
     -------
@@ -541,13 +602,25 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
     else:
         fig = ax.figure
 
-    # Plot both sets together so that plot_positions fits the full layout.
-    labels = torch.cat([torch.eye(2)[index].expand(len(pos), -1)
-                        for index, pos in enumerate(positions)])
-    plot_positions(torch.cat(positions), ax = ax, title = title, labels = labels,
-                   node_size = node_size, labels_names = ["Graph 1", "Graph 2"],
-                   voronoi = tuple(shifted_cells) if voronoi else None)
-    ax.get_legend().set_title("")
+    # Use each graph's own probabilities, with one shared category palette.
+    # Drawing separately also allows labels or cells to be absent on one side.
+    graph_labels = [getattr(graph, "labels", None) for graph in (graph_1, graph_2)]
+    if all(labels is not None for labels in graph_labels):
+        if any(labels.ndim != 2 for labels in graph_labels):
+            raise ValueError("graph.labels must be a probability matrix [num_nodes, K]")
+        if graph_labels[0].shape[1] != graph_labels[1].shape[1]:
+            raise ValueError("Both graphs must use the same label categories")
+    limits = []
+    marker_size = node_size if node_size is not None else max(70, 1800 / sum(map(len, positions)))
+    for index, (pos, labels) in enumerate(zip(positions, graph_labels)):
+        plot_positions(pos, ax=ax, title=title, labels=labels,
+                       node_size=marker_size, palette=palette, mode=mode, label_index=label_index, show_legend=show_legend,
+                       labels_names=labels_names if labels is not None else None,
+                       voronoi=shifted_cells[index] if voronoi else None)
+        limits.append((ax.get_xlim(), ax.get_ylim()))
+    # Each call fits one graph; retain the union so both remain visible.
+    ax.set_xlim(min(limit[0][0] for limit in limits), max(limit[0][1] for limit in limits))
+    ax.set_ylim(min(limit[1][0] for limit in limits), max(limit[1][1] for limit in limits))
 
     source, target = torch.nonzero(weights > 0, as_tuple = True)
     if source.numel() > 0:
@@ -560,13 +633,15 @@ def plot_node_alignment(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
 
     if standalone:
         fig.tight_layout()
-        plt.show()
+        show_figure(fig)
 
 
 def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
                voronoi: bool = False, node_size: float | None = None,
                labels_names: list[str] | None = None,
-               palette: str | None = None) -> None:
+               palette: str | None = None,
+               mode: str = "standard", label_index: int = 0,
+               show_legend: bool = True) -> None:
     """Plot a graph using the spatial coordinates stored in ``graph.pos``.
 
     Parameters
@@ -591,6 +666,17 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
     labels_names : list[str] | None, default = None
         Optional K category names in column order of ``graph.labels``.
         Labels must be a probability matrix [num_nodes, K].
+
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
 
     Returns
     -------
@@ -617,7 +703,7 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         ax.axis("off")
         if standalone:
             fig.tight_layout()
-            plt.show()
+            show_figure(fig)
         return
     if not isinstance(positions, torch.Tensor):
         raise TypeError("graph.pos must be a torch.Tensor")
@@ -647,12 +733,14 @@ def plot_nodes(graph: Data, title: str = "", ax: Axes | None = None,
         node_size = node_size,
         labels_names = labels_names,
         palette = palette,
+        mode = mode, label_index = label_index, show_legend = show_legend,
     )
 
 
 def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, float] = (7, 7),
                  ax: Axes | None = None, show_marginals: bool = False,
-                 legend: bool = False) -> None:
+                 show_legend: bool = False, row_colors: np.ndarray | None = None,
+                 column_colors: np.ndarray | None = None) -> None:
     """
     Plots a matrix as a heatmap.
 
@@ -673,8 +761,12 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
         horizontal bars to its left. Each bar is aligned with its matrix
         column or row and shows the actual sum, without normalization.
 
-    legend : bool, default = False
+    show_legend : bool, default = False
         Display the colorbar mapping colors to matrix values.
+
+    row_colors, column_colors : numpy.ndarray | None, default = None
+        Optional RGB arrays [num_rows, 3] and [num_columns, 3] for the
+        marginal bars, in matrix index order. Ignored without marginals.
 
     Returns:
     -------
@@ -709,9 +801,9 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
 
         num_rows, num_columns = matrix_values.shape
         ax_top.bar(np.arange(num_columns), matrix_values.sum(axis = 0),
-                   width = 1.0, color = "lightcoral", edgecolor = "black", linewidth = 0.5)
+                   width = 1.0, color = "lightcoral" if column_colors is None else column_colors, edgecolor = "black", linewidth = 0.5)
         ax_left.barh(np.arange(num_rows), matrix_values.sum(axis = 1),
-                     height = 1.0, color = "lightsteelblue", edgecolor = "black", linewidth = 0.5)
+                     height = 1.0, color = "lightsteelblue" if row_colors is None else row_colors, edgecolor = "black", linewidth = 0.5)
         ax_left.invert_xaxis()
         ax.set_xlim(-0.5, num_columns - 0.5)
         ax.set_ylim(num_rows - 0.5, -0.5)
@@ -721,7 +813,7 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
         for marginal_ax in (ax_top, ax_left):
             marginal_ax.set_axis_off()
 
-    if legend:
+    if show_legend:
         if show_marginals:
             ax_colorbar = divider.append_axes("right", size = "5%", pad = 0.15)
             fig.colorbar(image, cax = ax_colorbar)
@@ -734,9 +826,13 @@ def plot_heatmap(matrix: torch.Tensor, title: str = "", figsize: tuple[float, fl
 
 
 def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
-                  title: str = "Coupling", figsize: tuple[float, float] = (15, 7),
-                  node_size: float | None = None, linewidth: float = 2.0,
-                  show_marginals: bool = False, voronoi: bool = False) -> None:
+                      title: str = "Coupling", figsize: tuple[float, float] = (15, 7),
+                      node_size: float | None = None, linewidth: float = 2.0,
+                      show_marginals: bool = False, voronoi: bool = False,
+                      labels_names: list[str] | None = None,
+                      palette: str | None = None,
+                      mode: str = "standard", label_index: int = 0,
+                      show_legend: bool = True) -> None:
     """Plot a coupling heatmap and node alignment side by side.
 
     Parameters
@@ -759,10 +855,31 @@ def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
         proportional to their coupling values.
     show_marginals : bool, default = False
         Whether to show column and row sums above and beside the heatmap.
+        Bars use the corresponding node colors (graph_2 above, graph_1 left).
 
     voronoi : bool, default = False
         Draw available graph.cells behind the aligned nodes. Passed to
         plot_node_alignment; cells are translated together with the nodes.
+
+    labels_names : list[str] | None, default = None
+        Shared category names in column order of graph.labels, otherwise
+        numeric labels are used. Labels are optional probability matrices
+        [num_nodes, K]; both graphs must use the same categories when provided.
+        Unlabelled graphs retain default colors. The legend shows categories,
+        not graph identities.
+    palette : str | None, default = None
+        Shared categorical palette, passed to plot_positions.
+
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
 
     Returns
     -------
@@ -780,38 +897,63 @@ def plot_coupling_fgw(graph_1: Data, graph_2: Data, coupling: torch.Tensor,
             node_size = node_size,
             linewidth = linewidth,
             voronoi = voronoi,
+            labels_names = labels_names,
+            palette = palette,
+            mode = mode, label_index = label_index, show_legend = show_legend,
         )
-        legend = axes[1].get_legend()
-        if legend is not None:
-            legend.remove()
+        # Marginal rows belong to graph_1, columns to graph_2. Reuse the
+        # same coloring mode and palette used for the node colors.
+        marginal_colors = [None, None]
+        if show_marginals:
+            for index, graph in enumerate((graph_1, graph_2)):
+                labels = getattr(graph, "labels", None)
+                if labels is None:
+                    marginal_colors[index] = np.tile(to_rgba(_GRAPH_NODE_COLOR)[:3], (graph.num_nodes, 1))
+                else:
+                    marginal_colors[index] = color_labels(
+                        labels, set_colors(labels.shape[1], palette), mode=mode, label_index=label_index
+                    ).detach().cpu().numpy()
         matrix = coupling.to_dense() if coupling.layout != torch.strided else coupling
         plot_heatmap(
             matrix,
             title = "Coupling matrix",
             ax = axes[0],
             show_marginals = show_marginals,
+            row_colors = marginal_colors[0],
+            column_colors = marginal_colors[1],
         )
+        if show_marginals and mode == "heatmap":
+            top, left = fig.axes[-2:]
+            for graph, marginal_ax in ((graph_1, left), (graph_2, top)):
+                labels = getattr(graph, "labels", None)
+                if labels is not None:
+                    bars = list(marginal_ax.patches)
+                    def update_bars(rgb, selected, bars=bars):
+                        for bar, color in zip(bars, rgb):
+                            bar.set_facecolor(color)
+                    bind_colors(fig, labels, set_colors(labels.shape[1], palette),
+                                labels_names, label_index, update_bars)
     except Exception:
         plt.close(fig)
         raise
 
     fig.suptitle(title)
     fig.tight_layout(rect = (0, 0, 1, 0.95))
-    plt.show()
+    show_figure(fig)
 
 
-def plot_coupling_hungarian(
-    batch_1: Sequence[Data], batch_2: Sequence[Data],
-    assignments: torch.Tensor | Sequence[int], *,
-    max_pairs: int | None = None,
-    show_adjacency: bool = False,
-    voronoi: bool = False,
-    figsize: tuple[float, float] | None = None,
-    title: str = "Hungarian graph matching",
-    node_size: float | None = None,
-    labels_names: list[str] | None = None,
-    palette: str | None = None,
-) -> None:
+def plot_coupling_hungarian(batch_1: Sequence[Data], batch_2: Sequence[Data], assignments: torch.Tensor | Sequence[int], *,
+                            max_pairs: int | None = None,
+                            show_adjacency: bool = False,
+                            voronoi: bool = False,
+                            figsize: tuple[float, float] | None = None,
+                            title: str = "Hungarian graph matching",
+                            node_size: float | None = None,
+                            labels_names: list[str] | None = None,
+                            palette: str | None = None,
+                            mode: str = "standard",
+                            label_index: int = 0,
+                            show_legend: bool = True) -> None:
     """Plot matched graph pairs in a grid, using a previously computed assignment.
 
     Parameters:
@@ -849,6 +991,17 @@ def plot_coupling_hungarian(
         Category names in column order, shared across all graphs.
     palette : str | None, default = None
         Shared categorical palette; None uses the global default.
+
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
 
     Returns:
     -------
@@ -902,7 +1055,8 @@ def plot_coupling_hungarian(
             # A blank space suppresses plot_nodes' automatic node/edge title.
             plot_nodes(graph, title=" ",
                        ax=axes[0, column], node_size=node_size, voronoi=voronoi,
-                       labels_names=labels_names, palette=palette)
+                       labels_names=labels_names, palette=palette, mode=mode, label_index=label_index,
+                       show_legend=show_legend)
             if show_adjacency:
                 # adjacency_matrix requires at least two nodes; a singleton's
                 # entry is determined directly by the presence of a self-loop.
@@ -923,14 +1077,16 @@ def plot_coupling_hungarian(
             if legend is not None:
                 for label in [legend.get_title(), *legend.get_texts()]:
                     label.set_fontsize(label.get_fontsize() * font_scale)
-    plt.show()
+    show_figure(fig)
 
 
 def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
                figsize: tuple[float, float] = (15, 7),
                voronoi: bool = False, node_size: float | None = None,
                labels_names: list[str] | None = None,
-               palette: str | None = None) -> None:
+               palette: str | None = None,
+               mode: str = "standard", label_index: int = 0,
+               show_legend: bool = True) -> None:
     """Plot a graph's adjacency matrix and spatial representation side by side.
 
     Parameters
@@ -953,6 +1109,17 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         Shared categorical palette name; None uses the global default.
     labels_names : list[str] | None, default = None
         Optional K category names in column order of ``graph.labels``.
+
+    mode : str, default = "standard"
+        "standard" shades the dominant category by entropy. "heatmap" shows
+        the probability of one category, from white (0) to its pure color (1).
+        A shared category dropdown is displayed in notebooks with ipywidgets;
+        scripts render a static figure. Ignored for graphs without labels.
+    show_legend : bool, default = True
+        Show the category legend in standard mode or the probability colorbar
+        in heatmap mode. False hides either without disabling the selector.
+    label_index : int, default = 0
+        Initial category column for heatmap mode, also used for static plots.
 
     Returns
     -------
@@ -983,6 +1150,7 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         adjacency,
         title = " ",
         ax = axes[0],
+        show_legend = show_legend
     )
     plot_nodes(
         graph,
@@ -992,12 +1160,13 @@ def plot_graph(graph: Data, device: torch.device | str = "cpu", title: str = "",
         node_size = node_size,
         labels_names = labels_names,
         palette = palette,
+        mode = mode, label_index = label_index, show_legend = show_legend,
     )
 
     overall_title = title or f"n={graph.num_nodes}, edges={num_edges}"
     fig.suptitle(overall_title)
     fig.tight_layout(rect = (0, 0, 1, 0.95))
-    plt.show()
+    show_figure(fig)
 
 
 def plot_elbow(matrix: torch.Tensor, title: str = "Eigenvalue elbow plot",

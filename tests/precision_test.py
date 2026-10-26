@@ -57,26 +57,30 @@ def test_jaccard_torch_matches_neighborhood_counting(device, sparse, case):
 
 
 @pytest.mark.parametrize("device", DEVICES)
-def test_bubbles_preserves_label_mapping(device):
+@pytest.mark.parametrize("radius_polygon", [0., 1., 2.5])
+def test_bubbles_preserves_label_mapping(device, radius_polygon):
     """Interleaved and special labels map to the correct centers in node order."""
     from graphtools.sampling import positions
 
     assignments = torch.tensor([7, -1, 2, -2, 7, 2], device=device)
-    result = positions.bubbles(6, communities=assignments, device=device, radius=0)
-    centers = positions.polygonal(4, device=device)
+    result = positions.bubbles(6, communities=assignments, device=device,
+                               radius_bubble=0, radius_polygon=radius_polygon)
+    centers = positions.polygonal(4, device=device, radius=radius_polygon)
     torch.testing.assert_close(result, centers[torch.tensor([3, 1, 2, 0, 3, 2], device=device)])
 
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("labels", [[0, 0, 0, 0], [0, 1, 2, 3]])
-def test_bubbles_offsets_stay_in_disk(device, labels):
-    """Single and multiple bubbles return finite positions within the given radius."""
+@pytest.mark.parametrize("radius_polygon", [0., 2.5])
+def test_bubbles_offsets_stay_in_disk(device, labels, radius_polygon):
+    """Bubble offsets respect their radius independently of the polygon radius."""
     from graphtools.sampling import positions
 
     assignments = torch.tensor(labels, device=device)
-    result = positions.bubbles(4, communities=assignments, device=device, radius=.2)
+    result = positions.bubbles(4, communities=assignments, device=device,
+                               radius_bubble=.2, radius_polygon=radius_polygon)
     centers = (torch.zeros((4, 2), device=device) if labels[0] == labels[-1]
-               else positions.polygonal(4, device=device))
+               else positions.polygonal(4, device=device, radius=radius_polygon))
     assert result.shape == (4, 2)
     assert result.device.type == device
     assert torch.isfinite(result).all()
@@ -579,9 +583,10 @@ def test_prepare_batches_groups_by_support():
 def test_bubbles_random_balanced_groups(device, n, K):
     """Random memberships occupy every bubble and differ in size by at most one."""
     from graphtools import graphon
-    result = graphon.sample_positions(n, "bubbles", K=K, radius=0, device=device)
+    result = graphon.sample_positions(n, "bubbles", K=K, radius_bubble=0,
+                                      radius_polygon=2.5, device=device)
     centers = (torch.zeros((1, 2), device=device) if K == 1
-               else graphon.polygonal(K, device=device))
+               else graphon.polygonal(K, device=device, radius=2.5))
     membership = torch.cdist(result, centers).argmin(1)
     counts = torch.bincount(membership, minlength=K)
     expected = torch.full((K,), n // K, device=device)
@@ -599,11 +604,11 @@ def test_sample_graph_bubbles_uses_external_or_computed_communities(monkeypatch)
         calls.append(graph)
         return labels
     monkeypatch.setattr(graphon, "spectral_clustering", cluster)
-    automatic = graphon.sample_graph(4, positions="bubbles", position_kwargs={"radius": 0})
+    automatic = graphon.sample_graph(4, positions="bubbles", position_kwargs={"radius_bubble": 0, "radius_polygon": 2.5})
     explicit = graphon.sample_graph(4, positions="bubbles",
-                                    position_kwargs={"communities": labels, "radius": 0})
+                                    position_kwargs={"communities": labels, "radius_bubble": 0, "radius_polygon": 2.5})
     assert len(calls) == 1
-    expected = graphon.polygonal(2)[labels]
+    expected = graphon.polygonal(2, radius=2.5)[labels]
     torch.testing.assert_close(automatic.pos, expected)
     torch.testing.assert_close(explicit.pos, expected)
     torch.testing.assert_close(labels, torch.tensor([1, 0, 1, 0]))
