@@ -293,3 +293,13 @@ def test_hungarian_hide_legends(monkeypatch, mode):
     if mode == "heatmap":
         fig._label_heatmap.select(1)
         assert len(fig.axes) == 2
+
+
+def test_set_colors_ignores_default_device():
+    """Palette tensors stay on CPU even under a non-CPU Torch default."""
+    expected = set_colors(3)
+    # Meta exercises default-device handling on CPU-only CI as well.
+    with torch.device("cuda" if torch.cuda.is_available() else "meta"):
+        colors = set_colors(3)
+    assert colors.device.type == "cpu"
+    np.testing.assert_array_equal(colors.numpy(), expected.numpy())

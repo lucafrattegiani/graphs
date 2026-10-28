@@ -22,7 +22,9 @@ def set_colors(K: int, palette: str | None = None) -> torch.Tensor:
         raise ValueError("Choose a categorical palette with a fixed color list")
     if K > len(cmap.colors):
         raise ValueError(f"Palette {cmap.name!r} contains only {len(cmap.colors)} colors")
-    return torch.tensor([mpl.colors.to_rgb(c) for c in cmap.colors[:K]], dtype=torch.float32)
+    # Matplotlib needs host colors, even when Torch's default device is CUDA.
+    return torch.tensor([mpl.colors.to_rgb(c) for c in cmap.colors[:K]],
+                        dtype=torch.float32, device="cpu")
 
 
 def color_labels(labels: torch.Tensor, colors: torch.Tensor,
