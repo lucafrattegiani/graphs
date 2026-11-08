@@ -17,21 +17,21 @@ The project uses two separate layers:
 
 ### Supported versions
 
-| Dependency | Allowed range |
-| --- | --- |
-| matplotlib | `>=3.8.4,<4` |
-| networkx | `>=2.8.8,<4` |
-| numpy | `>=1.23.2,<3` |
-| POT | `>=0.9.7,<0.10` |
-| scipy | `>=1.13,<2` |
-| shapely | `>=2.1,<3` |
-| torch | `>=2.4.1,<3` |
-| torch-geometric | `>=2.3,<3` |
-| torch-kmeans | `>=0.2.0,<0.3` |
-| tqdm | `>=4.65,<5` |
-| ipykernel (notebook) | `>=6.17,<8` |
-| ipython (notebook) | `>=8.6,<10` |
-| ipywidgets (notebook) | `>=8,<9` |
+| Dependency | Minimal version | Maximal version |
+| :---: | :---: | :---: |
+| matplotlib | `>=3.8.4` | `<4` |
+| networkx | `>=2.8.8` | `<4` |
+| numpy | `>=1.23.2` | `<3` |
+| POT | `>=0.9.7` | `<0.10` |
+| scipy | `>=1.13` | `<2` |
+| shapely | `>=2.1` | `<3` |
+| torch | `>=2.4.1` | `<3` |
+| torch-geometric | `>=2.3` | `<3` |
+| torch-kmeans | `>=0.2.0` | `<0.3` |
+| tqdm | `>=4.65` | `<5` |
+| ipykernel (notebook) | `>=6.17` | `<8` |
+| ipython (notebook) | `>=8.6` | `<10` |
+| ipywidgets (notebook) | `>=8` | `<9` |
 
 ## First installation
 
