@@ -4,15 +4,34 @@ PyTorch and PyTorch Geometric based package for:
 - Graphon sampling ([graph sampling example](notebooks/graph_sampling.ipynb))
 - Network analysis ([graph metrics example](notebooks/graph_metrics.ipynb))
 - Graph construction ([graph building example](notebooks/graph_building.ipynb))
-- Optimal transport between graphs ([graph ot example](notebooks/graph_ot.ipynb))
+- Graph's optimal transport ([graph ot example](notebooks/graph_ot.ipynb))
 
 ## Dependency management
 
 The project uses two separate layers:
 
-- `envs/environment.yaml` creates a minimal Conda environment with Python and pip.
-- `envs/environment-cuda.yaml` adapts the minimal Conda environment to support CUDA.
-- `pyproject.toml` defines the `graphtools` package and all its Python dependencies without overwriting the already installed torch version.
+- `envs/environment.yaml` creates a Conda environment with Python 3.11, pip and the CPU PyTorch build.
+- `envs/environment-cuda.yaml` selects the CUDA 12.6 PyTorch build for supported Linux/Windows systems.
+- `pyproject.toml` defines the package's dependency ranges. Pip retains an installed PyTorch build only when its version satisfies the declared range.
+- `envs/requirements-torch-{cpu,cuda}.txt` select the PyTorch wheel index.
+
+### Supported versions
+
+| Dependency | Allowed range | Reason for the lower bound |
+| --- | --- |
+| matplotlib | `>=3.8.4,<4` |
+| networkx | `>=2.8.8,<4` |
+| numpy | `>=1.23.2,<3` |
+| POT | `>=0.9.7,<0.10` |
+| scipy | `>=1.13,<2` |
+| shapely | `>=2.1,<3` |
+| torch | `>=2.4.1,<3` |
+| torch-geometric | `>=2.3,<3` |
+| torch-kmeans | `>=0.2.0,<0.3` |
+| tqdm | `>=4.65,<5` |
+| ipykernel (notebook) | `>=6.17,<8` |
+| ipython (notebook) | `>=8.6,<10` |
+| ipywidgets (notebook) | `>=8,<9` |
 
 ## First installation
 
@@ -82,9 +101,12 @@ from graphtools import graphon, metrics, builder, opt
 
 ## Test package modifications
 
-Run the execution-contract tests with:
+Install the test and notebook extras, check dependency consistency, and run the
+execution-contract tests (notebook extras enable the widget test):
 
 ```bash
+python -m pip install -e ".[test,notebook]"
+python -m pip check
 python -m pytest tests -v
 ```
 
@@ -100,7 +122,7 @@ git pull
 
 ### CASE I: Changes in source files
 
-The package does not need to be reinstalled. The editable installation points directly to `src/graphs`, so source changes are immediately available. 
+The package does not need to be reinstalled. The editable installation points directly to `src/graphtools`, so source changes are immediately available.
 
 ### CASE II: Changes in `pyproject.toml`
 

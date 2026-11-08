@@ -3,7 +3,8 @@ from scipy.optimize import linear_sum_assignment
 from torch_geometric.data import Data
 import torch
 import ot
-from tqdm.auto import tqdm
+# Text output works in terminals and persists in saved notebook cell outputs.
+from tqdm import tqdm
 
 from ..validity import _graph_device, _floating_dtype
 from ..utils.preprocessing import prepare_batches
@@ -149,7 +150,7 @@ def hungarian_coupling(
     # Each pair of groups has fixed node counts, even for heterogeneous inputs.
     C = torch.empty((K, K), device=device, dtype=dtype)
     with tqdm(total=K * K, desc=f"FGW costs ({C.device})", unit="pair",
-              disable=not verbose, dynamic_ncols=True) as progress:
+              disable=not verbose, dynamic_ncols=True, leave=True) as progress:
         for group_1 in groups_1.values():
             for group_2 in groups_2.values():
                 C1, h1, x1 = group_1["C"], group_1["h"], group_1["x"]

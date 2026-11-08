@@ -20,13 +20,16 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            envs/requirements-torch-cpu.txt
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install ".[test]"
+          python -m pip install "pip>=21.3"
+          python -m pip install -r envs/requirements-torch-cpu.txt
+          python -m pip install ".[test,notebook]"
+          python -m pip check
 
       - name: Run tests
         run: python -m pytest tests -v -ra

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,25 +9,26 @@ description = "Graphon sampling and graph analysis tools"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "matplotlib",
-    "networkx",
-    "numpy",
-    "POT>=0.9.7",
-    "scipy",
-    "shapely>=2.1",
-    "torch",
-    "torch-geometric",
-    "torch-kmeans",
-    "tqdm",
+    "matplotlib>=3.8.4,<4",
+    "networkx>=2.8.8,<4",
+    "numpy>=1.23.2,<3",
+    "POT>=0.9.7,<0.10",
+    "scipy>=1.13,<2",
+    "shapely>=2.1,<3",
+    "torch>=2.4.1,<3",
+    "torch-geometric>=2.3,<3",
+    "torch-kmeans>=0.2.0,<0.3",
+    "tqdm>=4.65,<5",
 ]
 
 [project.optional-dependencies]
 notebook = [
-    "ipykernel",
-    "ipywidgets",
+    "ipykernel>=6.17,<8",
+    "ipython>=8.6,<10",
+    "ipywidgets>=8,<9",
 ]
 test = [
-    "pytest",
+    "pytest>=7.2,<10",
 ]
 
 [tool.setuptools]

@@ -102,7 +102,8 @@ def snapshot(graph):
 
 def assert_graph_unchanged(graph, before):
     """Require unchanged attributes, storage objects, values, device and dtype."""
-    assert set(graph.keys()) == set(before)
+    # Data.keys was a property in PyG 2.3; to_dict works with both APIs.
+    assert set(graph.to_dict()) == set(before)
     for name, saved in before.items():
         value = graph[name]
         if isinstance(saved, tuple) and saved and isinstance(saved[0], torch.Tensor):
