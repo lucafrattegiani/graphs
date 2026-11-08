@@ -17,7 +17,7 @@ The project uses two separate layers:
 
 ### Supported versions
 
-| Dependency | Allowed range | Reason for the lower bound |
+| Dependency | Allowed range |
 | --- | --- |
 | matplotlib | `>=3.8.4,<4` |
 | networkx | `>=2.8.8,<4` |
