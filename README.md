@@ -29,9 +29,9 @@ The project uses two separate layers:
 | torch-geometric | `>=2.3` | `<3` |
 | torch-kmeans | `>=0.2.0` | `<0.3` |
 | tqdm | `>=4.65` | `<5` |
-| ipykernel (notebook) | `>=6.17` | `<8` |
-| ipython (notebook) | `>=8.6` | `<10` |
-| ipywidgets (notebook) | `>=8` | `<9` |
+| ipykernel | `>=6.17` | `<8` |
+| ipython | `>=8.6` | `<10` |
+| ipywidgets | `>=8` | `<9` |
 
 ## First installation
 
