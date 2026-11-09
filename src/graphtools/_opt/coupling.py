@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import sys
 from scipy.optimize import linear_sum_assignment
 from torch_geometric.data import Data
 import torch
@@ -105,15 +106,6 @@ def hungarian_coupling(
         ``cost`` : scalar tensor equal to sum(W * C), the average matched cost.
         All tensors use the selected device. Floating input dtypes are
         promoted to a common dtype, with a minimum precision of float32.
-
-    Notes:
-    -----
-    FGW costs are numerical approximations and may differ from the package's
-    CPU conditional-gradient solver. Linear assignment is optimal for the
-    computed cost matrix; global optimality of each FGW solve is not guaranteed.
-    Original graph indices are preserved across groups. Only zero-mass nodes
-    are excluded from the solver; structural costs are not recomputed.
-    Gradients are disabled and node-level transport plans are not retained.
     """
     # 1. Check the batch contract and select one device/dtype for all pairs.
     if len(batch_1) == 0 or len(batch_1) != len(batch_2):
@@ -150,7 +142,10 @@ def hungarian_coupling(
     # Each pair of groups has fixed node counts, even for heterogeneous inputs.
     C = torch.empty((K, K), device=device, dtype=dtype)
     with tqdm(total=K * K, desc=f"FGW costs ({C.device})", unit="pair",
-              disable=not verbose, dynamic_ncols=True, leave=True) as progress:
+              # Notebook streams cannot report their width: use 120 columns.
+              # In a terminal, keep adapting to the actual window width.
+              disable=not verbose, ncols=120, dynamic_ncols=sys.stderr.isatty(),
+              leave=True) as progress:
         for group_1 in groups_1.values():
             for group_2 in groups_2.values():
                 C1, h1, x1 = group_1["C"], group_1["h"], group_1["x"]
